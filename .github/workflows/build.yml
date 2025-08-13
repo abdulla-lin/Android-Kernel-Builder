@@ -1,51 +1,50 @@
 name: Build CMF Phone 1 Kernel (ZyC-Clang 22.0)
 
-on:
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout kernel source
-        uses: actions/checkout@v4
-        with:
-          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-          ref: main
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+        ref: main
 
-      - name: Install build dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y bc bison flex build-essential libssl-dev \
-          libncurses5-dev wget curl git python3 zip unzip
+    - name: Install build dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y bc bison flex build-essential libssl-dev \
+          libncurses5-dev wget curl git python3 zip unzip jq gh
 
-      - name: Download ZyC-Clang 22.0
-        run: |
-          mkdir -p $HOME/zyc-clang
-          wget https://github.com/ZyCromerZ/Clang/releases/download/zyc-clang-22.0.0-20240811/zyc-clang-22.0.0.tar.gz
-          tar -xzf zyc-clang-22.0.0.tar.gz -C $HOME/zyc-clang --strip-components=1
-          echo "$HOME/zyc-clang/bin" >> $GITHUB_PATH
+    - name: Download ZyC-Clang 22
+      env:
+        RELEASE_TAG: Clang-22.0.0git-20250805-release
+      run: |
+        echo "Fetching ZyC-Clang binary asset for $RELEASE_TAG"
+        gh release download "$RELEASE_TAG" -R ZyCromerZ/Clang -p "*.tar.gz" -D zycclang
+        tar -xzf zycclang/*.tar.gz -C zycclang --strip-components=1
+        echo "$PWD/zycclang/bin" >> $GITHUB_PATH
 
-      - name: Configure environment
-        run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CC=clang
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export PATH=$HOME/zyc-clang/bin:$PATH
+    - name: Configure environment
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CC=clang
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+        export PATH="$PWD/zycclang/bin:$PATH"
 
-      - name: Generate defconfig
-        run: |
-          make tetris_defconfig O=out
+    - name: Generate defconfig & build
+      run: |
+        make tetris_defconfig O=out
+        make -j$(nproc) O=out
 
-      - name: Build kernel
-        run: |
-          make -j$(nproc) O=out
-
-      - name: Upload Image.gz-dtb
-        uses: actions/upload-artifact@v4
-        with:
-          name: cmf1-Image.gz-dtb
-          path: out/arch/arm64/boot/Image.gz-dtb
+    - name: Upload Image.gz-dtb
+      uses: actions/upload-artifact@v4
+      with:
+        name: cmf1-Image.gz-dtb
+        path: out/arch/arm64/boot/Image.gz-dtb
+        
