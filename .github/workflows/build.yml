@@ -46,8 +46,8 @@ jobs:
        scripts/config --file out/.config --disable UAPI_HEADER_TEST --disable HEADERS_INSTALL
        make O=out olddefconfig
        rm -rf out/usr/include
-       sed -i '/missing-syscalls/d' scripts/Makefile.headersinst
-       make -j$(nproc) O=out Image missing-syscalls= V=1 2>&1 | tee build.log
+       echo -e "\nmissing-syscalls:\n\t@true\n" >> Makefile
+       make -j$(nproc) O=out Image V=1 2>&1 | tee build.log
     - name: Upload GKI kernel
       uses: actions/upload-artifact@v4
       with:
