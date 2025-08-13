@@ -1,46 +1,48 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang)
+name: CMF Kernel Build
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout kernel source
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: main
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+          ref: main
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y bc bison flex libssl-dev make git curl zip unzip
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y bc bison flex libssl-dev make git curl zip unzip \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi g++-arm-linux-gnueabi
 
-    - name: Fetch Neutron-Clang via AntMan
-      run: |
-        mkdir -p $HOME/toolchains/neutron-clang
-        cd $HOME/toolchains/neutron-clang
-        curl -LO https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman
-        chmod +x antman
-        ./antman -S
-        echo "$HOME/toolchains/neutron-clang/bin" >> $GITHUB_PATH
+      - name: Download Neutron Clang
+        run: |
+          mkdir -p $HOME/clang
+          wget -O clang.tar.gz https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/Neutron-22/Neutron-22.tar.gz
+          tar -xzf clang.tar.gz -C $HOME/clang --strip-components=1
+          echo "$HOME/clang/bin" >> $GITHUB_PATH
 
-    - name: Build kernel
-      run: |
-        export PATH="$PATH"
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CC=clang
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        make tetris_defconfig O=out
-        make -j$(nproc) O=out
+      - name: Build Kernel
+        run: |
+          export PATH="$HOME/clang/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CC=clang
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          mkdir out
+          make O=out tetris_defconfig
+          make O=out -j$(nproc)
 
-    - name: Upload Image.gz-dtb
-      uses: actions/upload-artifact@v4
-      with:
-        name: cmf1-Image.gz-dtb
-        path: out/arch/arm64/boot/Image.gz-dtb
-        
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image
+          path: out/arch/arm64/boot/Image.gz-dtb
+          
