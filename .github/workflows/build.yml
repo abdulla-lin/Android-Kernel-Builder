@@ -42,6 +42,8 @@ jobs:
        export OBJCOPY=llvm-objcopy
        export OBJDUMP=llvm-objdump
        export STRIP=llvm-strip
+       echo -e "\nmissing-syscalls:\n\t@true\n" >> Makefile
+       echo -e "\nPHONY += missing-syscalls\n" >> Makefile
        make O=out gki_defconfig
        scripts/config --file out/.config --disable UAPI_HEADER_TEST --disable HEADERS_INSTALL
        make O=out olddefconfig
