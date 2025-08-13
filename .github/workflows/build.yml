@@ -45,6 +45,7 @@ jobs:
        make O=out gki_defconfig
        scripts/config --file out/.config --disable UAPI_HEADER_TEST --disable HEADERS_INSTALL
        make O=out olddefconfig
+       rm -rf out/usr/include
        make -j$(nproc) O=out Image V=1 2>&1 | tee build.log
     - name: Upload GKI kernel
       uses: actions/upload-artifact@v4
