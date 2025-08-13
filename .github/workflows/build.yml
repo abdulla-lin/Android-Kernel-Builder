@@ -17,13 +17,15 @@ jobs:
         sudo apt install -y bc bison flex libssl-dev make libc6-dev libncurses5-dev \
         ccache git wget curl python3 unzip build-essential
 
-    - name: Download Neutron Clang
+    - name: Fetch Neutron-Clang via AntMan
       run: |
-        mkdir -p $HOME/clang
-        cd $HOME/clang
-        wget https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/Neutron-22/Neutron-22.tar.gz
-        tar -xf Neutron-22.tar.gz
-        echo "$HOME/clang/bin" >> $GITHUB_PATH
+        mkdir -p $HOME/toolchains/neutron-clang
+        cd $HOME/toolchains/neutron-clang
+        curl -LO https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman
+        chmod +x antman
+        ./antman -S
+        echo "$HOME/toolchains/neutron-clang/bin" >> $GITHUB_PATH
+        
 
     - name: Set gki_defconfig
       run: |
