@@ -46,7 +46,7 @@ jobs:
         export STRIP=llvm-strip
 
         # Use correct defconfig from your screenshot
-        make defconfig O=out
+        make gki_defconfig O=out
 
         # Build with full log
         make -j$(nproc) O=out V=1 2>&1 | tee build.log
