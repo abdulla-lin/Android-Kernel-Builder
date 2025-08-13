@@ -1,50 +1,57 @@
-name: Build CMF Phone 1 Kernel (ZyC-Clang 22.0)
+name: Build Nothing MT6878 Kernel
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout kernel source
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: main
+        ref: main   # change if your branch name is different
 
-    - name: Install build dependencies
+    - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y bc bison flex build-essential libssl-dev \
-          libncurses5-dev wget curl git python3 zip unzip jq gh
+        sudo apt install -y bc bison flex libssl-dev make gcc clang lld git wget tar xz-utils ccache
 
-    - name: Download ZyC-Clang 22
+    - name: Download ZyC-Clang
       env:
         RELEASE_TAG: Clang-22.0.0git-20250805-release
+        GH_TOKEN: ${{ github.token }}
       run: |
+        mkdir -p $HOME/zyc-clang
         echo "Fetching ZyC-Clang binary asset for $RELEASE_TAG"
-        gh release download "$RELEASE_TAG" -R ZyCromerZ/Clang -p "*.tar.gz" -D zycclang
-        tar -xzf zycclang/*.tar.gz -C zycclang --strip-components=1
-        echo "$PWD/zycclang/bin" >> $GITHUB_PATH
+        gh release download "$RELEASE_TAG" -R ZyCromerZ/Clang -p "*.tar.gz" -D $HOME/zyc-clang
+        tar -xzf $HOME/zyc-clang/*.tar.gz -C $HOME/zyc-clang --strip-components=1
+        echo "$HOME/zyc-clang/bin" >> $GITHUB_PATH
 
-    - name: Configure environment
+    - name: Build kernel
       run: |
+        export PATH="$HOME/zyc-clang/bin:$PATH"
         export ARCH=arm64
         export SUBARCH=arm64
         export CC=clang
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-        export PATH="$PWD/zycclang/bin:$PATH"
+        make vendor/tetris_defconfig
+        make -j$(nproc)
 
-    - name: Generate defconfig & build
+    - name: Package kernel
       run: |
-        make tetris_defconfig O=out
-        make -j$(nproc) O=out
+        mkdir -p output
+        cp arch/arm64/boot/Image output/
+        cp arch/arm64/boot/dtb output/ || true
+        cp arch/arm64/boot/dtbo.img output/ || true
+        cd output
+        zip -r9 kernel.zip .
 
-    - name: Upload Image.gz-dtb
+    - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: cmf1-Image.gz-dtb
-        path: out/arch/arm64/boot/Image.gz-dtb
-        
+        name: Nothing-MT6878-Kernel
+        path: output/kernel.zip
