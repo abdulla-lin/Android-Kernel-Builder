@@ -54,13 +54,13 @@ jobs:
     - name: Upload GKI kernel
       uses: actions/upload-artifact@v4
       with:
-       name: gki-image
-       path: |
-        out/arch/arm64/boot/Image
-        out/arch/arm64/boot/dtb.img
-        out/arch/arm64/boot/vmlinux
+       name: gki-kernel
+       path: out/arch/arm64/boot/**
+    
 
-        
+    - name: List build output
+      run: ls -l out/arch/arm64/boot/
+  
          
     - name: Upload build log
       uses: actions/upload-artifact@v4
