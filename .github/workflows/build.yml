@@ -52,8 +52,8 @@ jobs:
         make -j$(nproc) O=out V=1 2>&1 | tee build.log
 
         - name: Upload GKI Images
-      uses: actions/upload-artifact@v4
-      with:
+          uses: actions/upload-artifact@v4
+          with:
         name: cmf1-gki-images
         path: |
           out/arch/arm64/boot/Image*
