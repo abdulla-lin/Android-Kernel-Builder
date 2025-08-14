@@ -67,8 +67,9 @@ jobs:
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
     
-      - name: Upload Kernel + DTBO Artifacts
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-dtbo-build
-          path: build/
+          name: kernel-build
+          path: build/Image
+          
