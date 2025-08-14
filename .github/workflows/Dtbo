@@ -1,0 +1,64 @@
+name: Build DTBO Only
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-dtbo:
+    name: Build DTBO
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout kernel source
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v3
+        with:
+          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+          ref: main
+          submodules: recursive
+
+      # 2️⃣ Install dependencies
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y python3 python3-pip lz4 xz-utils device-tree-compiler
+
+      # 3️⃣ Setup toolchain (Neutron-Clang, same as kernel build)
+      - name: Setup Neutron-Clang Toolchain
+        run: |
+          mkdir -p $HOME/toolchains/neutron-clang
+          cd $HOME/toolchains/neutron-clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          bash antman -S
+
+      # 4️⃣ Set environment variables
+      - name: Set Environment
+        run: |
+          echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
+          echo "OUT_DIR=$GITHUB_WORKSPACE/out" >> $GITHUB_ENV
+          echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
+          echo "CC=$HOME/toolchains/neutron-clang/bin/clang" >> $GITHUB_ENV
+          echo "LD=$HOME/toolchains/neutron-clang/bin/ld.lld" >> $GITHUB_ENV
+
+      # 5️⃣ Prepare DTBO source
+      - name: Copy DTBO sources
+        run: |
+          mkdir -p $OUT_DIR/dtbo
+          cp -r $KERNEL_ROOT/arch/arm64/boot/dts/vendor/* $OUT_DIR/dtbo/
+
+      # 6️⃣ Build DTBO
+      - name: Build DTBO
+        run: |
+          cd $KERNEL_ROOT/tools/mkdtboimg
+          python3 mkdtboimg.py --output $OUT_DIR/dtbo.img --page_size 4096 $OUT_DIR/dtbo/*.dtbo
+
+      # 7️⃣ Upload DTBO artifact
+      - name: Upload DTBO Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dtbo-image
+          path: $OUT_DIR/dtbo
