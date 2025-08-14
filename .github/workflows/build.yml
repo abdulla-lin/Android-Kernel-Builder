@@ -1,4 +1,4 @@
-name: Build GKI Kernel + DTBO
+name: Build GKI Kernel
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build Kernel and DTBO
+    name: Build Kernel
     runs-on: ubuntu-latest
 
     steps:
@@ -34,7 +34,7 @@ jobs:
           cd $HOME/toolchains/neutron-clang
           curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
           chmod +x antman
-          bash antman -S  # install toolchain
+          bash antman -S
 
       - name: Set Environment Variables
         run: |
@@ -49,9 +49,11 @@ jobs:
       - name: Build Kernel
         run: |
           mkdir -p out build
-          # Configure kernel
+          # Load ROM config from arch/arm64/configs/config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
-          # Build kernel using LLVM tools (HOSTLD explicitly points to ld.lld)
+          # Resolve any missing options
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+          # Build kernel using Neutron-Clang
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=$HOME/toolchains/neutron-clang/bin/clang \
             AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
@@ -66,10 +68,8 @@ jobs:
             HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
-    
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-build
           path: build/Image
-          
