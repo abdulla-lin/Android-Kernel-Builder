@@ -49,13 +49,25 @@ jobs:
 
       - name: Build Kernel
         run: |
-          mkdir -p build out
-          chmod +x build.sh
-          # Skip menuconfig for headless build
-          sed -i '/menuconfig/d' build.sh
-          ./build.sh
+          mkdir -p out build
+          # Make default GKI config
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+          # Build kernel Image using Neutron-Clang
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
+            CC=$HOME/toolchains/neutron-clang/bin/clang \
+            AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
+            NM=$HOME/toolchains/neutron-clang/bin/llvm-nm \
+            LD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+            STRIP=$HOME/toolchains/neutron-clang/bin/llvm-strip \
+            OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
+            OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
+            READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
+            HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
+            HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++
+          # Copy final Image to build folder
+          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
-      - name: Upload Kernel Artifacts
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-build
