@@ -1,4 +1,4 @@
-name: Build GKI Kernel 6.1
+name: Build GKI Kernel + DTBO
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build Kernel
+    name: Build Kernel and DTBO
     runs-on: ubuntu-latest
 
     steps:
@@ -18,6 +18,18 @@ jobs:
           repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
           ref: main
           submodules: recursive
+
+      - name: Cache Neutron-Clang Toolchain
+        uses: actions/cache@v3
+        with:
+          path: $HOME/toolchains/neutron-clang
+          key: neutron-clang-10032024
+
+      - name: Cache Kernel Build Output
+        uses: actions/cache@v3
+        with:
+          path: out
+          key: kernel-out-${{ github.sha }}
 
       - name: Install Dependencies
         run: |
@@ -34,8 +46,7 @@ jobs:
           cd $HOME/toolchains/neutron-clang
           curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
           chmod +x antman
-          bash antman -S
-          bash antman --patch=glibc
+          bash antman -S  # skip --patch=glibc for CI
 
       - name: Set Environment Variables
         run: |
@@ -50,9 +61,7 @@ jobs:
       - name: Build Kernel
         run: |
           mkdir -p out build
-          # Make default GKI config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
-          # Build kernel Image using Neutron-Clang
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=$HOME/toolchains/neutron-clang/bin/clang \
             AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
@@ -64,11 +73,16 @@ jobs:
             READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
             HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
             HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++
-          # Copy final Image to build folder
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
-      - name: Upload Kernel Artifact
+      - name: Build DTBO
+        run: |
+          mkdir -p dtbo
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out dtbo.img
+          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/dtbo.img $GITHUB_WORKSPACE/build/
+
+      - name: Upload Kernel + DTBO Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-build
-          path: build/Image
+          name: kernel-dtbo-build
+          path: build/
