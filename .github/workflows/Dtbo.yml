@@ -50,12 +50,13 @@ jobs:
           mkdir -p $OUT_DIR/dtbo
           cp -r $KERNEL_ROOT/arch/arm64/boot/dts/mediatek/* $OUT_DIR/dtbo/
 
-      # 6️⃣ Build DTBO image
+       # 6️⃣ Build DTBO image
       - name: Build DTBO
         run: |
-          cd $KERNEL_ROOT/tools/mkdtboimg
-          python3 mkdtboimg.py --output $OUT_DIR/dtbo.img --page_size 4096 $OUT_DIR/dtbo/*.dtbo
-
+         python3 $KERNEL_ROOT/tools/mkdtboimg/mkdtboimg.py \
+         --output $OUT_DIR/dtbo.img \
+         --page_size 4096 $OUT_DIR/dtbo/*.dtbo
+      
       # 7️⃣ Upload DTBO artifact
       - name: Upload DTBO Artifact
         uses: actions/upload-artifact@v4
