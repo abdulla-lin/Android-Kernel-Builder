@@ -27,41 +27,13 @@ jobs:
               python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
           wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
           sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
-
-      - name: Setup Neutron-Clang Toolchain (with Branding)
+      - name: Setup Neutron-Clang Toolchain
         run: |
           mkdir -p $HOME/toolchains/neutron-clang
           cd $HOME/toolchains/neutron-clang
           curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
           chmod +x antman
           bash antman -S
-
-          # Rename clang binary
-          CLANG_BIN="$HOME/toolchains/neutron-clang/bin/clang"
-          mv "$CLANG_BIN" "$CLANG_BIN.real"
-          cat > "$CLANG_BIN" <<'EOF'
-          #!/bin/bash
-          if [[ "$1" == "--version" ]]; then
-            echo "GKI Kernel Toolchain (based on LLVM)"
-            exec "$(dirname "$0")/clang.real" --version | tail -n +2
-          fi
-          exec "$(dirname "$0")/clang.real" "$@"
-          EOF
-          chmod +x "$CLANG_BIN"
-
-          # Rename clang++
-          CLANGXX_BIN="$HOME/toolchains/neutron-clang/bin/clang++"
-          mv "$CLANGXX_BIN" "$CLANGXX_BIN.real"
-          cat > "$CLANGXX_BIN" <<'EOF'
-          #!/bin/bash
-          if [[ "$1" == "--version" ]]; then
-            echo "GKI Kernel Toolchain (based on LLVM)"
-            exec "$(dirname "$0")/clang++.real" --version | tail -n +2
-          fi
-          exec "$(dirname "$0")/clang++.real" "$@"
-          EOF
-          chmod +x "$CLANGXX_BIN"
-
       - name: Set Environment Variables
         run: |
           echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
@@ -71,12 +43,14 @@ jobs:
           echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=$HOME/toolchains/neutron-clang/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
           echo "BUILD_CC=$HOME/toolchains/neutron-clang/bin/clang" >> $GITHUB_ENV
-
       - name: Build Kernel
         run: |
           mkdir -p out build
+          # Load ROM config from arch/arm64/configs/config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
+          # Resolve any missing options
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+          # Build kernel using Neutron-Clang
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=$HOME/toolchains/neutron-clang/bin/clang \
             AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
@@ -90,7 +64,6 @@ jobs:
             HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
             HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
-
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
