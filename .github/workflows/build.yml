@@ -1,17 +1,17 @@
-name: Build Combact Kernel (ThinLTO)
+name: Build GKI Kernel
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Combact Kernel
+    name: Build Kernel
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Kernel source
       - name: Checkout Kernel Source
         uses: actions/checkout@v3
         with:
@@ -19,17 +19,16 @@ jobs:
           ref: main
           submodules: recursive
 
-      # 2) Deps
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git build-essential bc bison flex libssl-dev \
-            device-tree-compiler lz4 xz-utils zstd python3 python-is-python3 \
-            libelf-dev libarchive-tools pahole curl unzip \
-            libncurses-dev cpio kmod openssl
+          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
+              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev libx11-dev libreadline-dev libgl1 libgl1-mesa-dev \
+              python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
+          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
+          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
 
-      # 3) Toolchain (Neutron-Clang)
-      - name: Setup Neutron-Clang Toolchain
+      - name: Setup Neutron-Clang Toolchain (with Branding)
         run: |
           mkdir -p $HOME/toolchains/neutron-clang
           cd $HOME/toolchains/neutron-clang
@@ -37,89 +36,63 @@ jobs:
           chmod +x antman
           bash antman -S
 
-          # ---- Compiler branding wrapper ----
-          # Move real clang -> clang.real and insert a wrapper that prints a custom name on --version
+          # Rename clang binary
           CLANG_BIN="$HOME/toolchains/neutron-clang/bin/clang"
           mv "$CLANG_BIN" "$CLANG_BIN.real"
           cat > "$CLANG_BIN" <<'EOF'
           #!/bin/bash
           if [[ "$1" == "--version" ]]; then
-            echo "Combact Kernel Toolchain (based on LLVM)"
+            echo "GKI Kernel Toolchain (based on LLVM)"
             exec "$(dirname "$0")/clang.real" --version | tail -n +2
           fi
           exec "$(dirname "$0")/clang.real" "$@"
           EOF
           chmod +x "$CLANG_BIN"
 
-          # Do the same for clang++ to avoid mixed branding
+          # Rename clang++
           CLANGXX_BIN="$HOME/toolchains/neutron-clang/bin/clang++"
           mv "$CLANGXX_BIN" "$CLANGXX_BIN.real"
           cat > "$CLANGXX_BIN" <<'EOF'
           #!/bin/bash
           if [[ "$1" == "--version" ]]; then
-            echo "Combact Kernel Toolchain (based on LLVM)"
+            echo "GKI Kernel Toolchain (based on LLVM)"
             exec "$(dirname "$0")/clang++.real" --version | tail -n +2
           fi
           exec "$(dirname "$0")/clang++.real" "$@"
           EOF
           chmod +x "$CLANGXX_BIN"
 
-      # 4) Env
       - name: Set Environment Variables
         run: |
+          echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
           echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_USER=Combact" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_HOST=Kernel" >> $GITHUB_ENV
-          echo "TZ=Asia/Kolkata" >> $GITHUB_ENV
+          echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$HOME/toolchains/neutron-clang/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "BUILD_CC=$HOME/toolchains/neutron-clang/bin/clang" >> $GITHUB_ENV
 
-      # 5) Configure (use your defconfig or ROM config target)
-      #    Replace 'gki_defconfig' with your actual config target if needed.
-      - name: Configure Kernel (defconfig + branding + ThinLTO)
+      - name: Build Kernel
         run: |
           mkdir -p out build
-          # Use your desired defconfig target here:
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out ARCH=arm64 gki_defconfig
-
-          # Enable ThinLTO + CFI (safe defaults)
-          ${GITHUB_WORKSPACE}/scripts/config --file $GITHUB_WORKSPACE/out/.config \
-            -e LTO_CLANG -e LTO -e THINLTO -e CFI_CLANG -e CFI_PERMISSIVE
-
-          # Brand the kernel name shown in About phone
-          ${GITHUB_WORKSPACE}/scripts/config --file $GITHUB_WORKSPACE/out/.config \
-            --set-str LOCALVERSION "-CombactKernel"
-
-          # Finalize config
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out ARCH=arm64 olddefconfig
-
-      # 6) Build (LLVM + ThinLTO)
-      - name: Build Kernel (ThinLTO)
-        run: |
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
-            ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-            CC=clang \
-            AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip LD=ld.lld \
-            LTO=thin
+            CC=$HOME/toolchains/neutron-clang/bin/clang \
+            AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
+            NM=$HOME/toolchains/neutron-clang/bin/llvm-nm \
+            LD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+            STRIP=$HOME/toolchains/neutron-clang/bin/llvm-strip \
+            OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
+            OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
+            READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
+            HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
+            HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
+            HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld
+          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
-          # Ensure we have a compressed kernel for Android boot images
-          if [ ! -f "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image.gz" ] && [ -f "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image" ]; then
-            gzip -f -9 "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image"
-          fi
-
-          # Collect artifacts
-          cp -f $GITHUB_WORKSPACE/out/arch/arm64/boot/Image.gz $GITHUB_WORKSPACE/build/ 2>/dev/null || true
-          cp -f $GITHUB_WORKSPACE/out/arch/arm64/boot/Image.gz-dtb $GITHUB_WORKSPACE/build/ 2>/dev/null || true
-          cp -f $GITHUB_WORKSPACE/out/vmlinux $GITHUB_WORKSPACE/build/ 2>/dev/null || true
-
-      # 7) Upload artifacts (no DTBO)
-      - name: Upload Kernel Artifacts
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CombactKernel-Image
-          path: |
-            build/Image.gz
-            build/Image.gz-dtb
-            build/vmlinux
-          if-no-files-found: warn
+          name: kernel-build
+          path: build/Image
