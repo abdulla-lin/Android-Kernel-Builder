@@ -26,7 +26,7 @@ jobs:
           sudo apt update
           sudo apt install -y python3 python3-pip lz4 xz-utils device-tree-compiler
 
-      # 3️⃣ Setup toolchain (Neutron-Clang, same as kernel build)
+      # 3️⃣ Setup Neutron-Clang Toolchain
       - name: Setup Neutron-Clang Toolchain
         run: |
           mkdir -p $HOME/toolchains/neutron-clang
@@ -44,13 +44,13 @@ jobs:
           echo "CC=$HOME/toolchains/neutron-clang/bin/clang" >> $GITHUB_ENV
           echo "LD=$HOME/toolchains/neutron-clang/bin/ld.lld" >> $GITHUB_ENV
 
-      # 5️⃣ Prepare DTBO source
-      - name: Copy DTBO sources
+      # 5️⃣ Copy only MediaTek DTBO sources
+      - name: Prepare DTBO sources
         run: |
           mkdir -p $OUT_DIR/dtbo
-          cp -r $KERNEL_ROOT/arch/arm64/boot/dts/vendor/* $OUT_DIR/dtbo/
+          cp -r $KERNEL_ROOT/arch/arm64/boot/dts/mediatek/* $OUT_DIR/dtbo/
 
-      # 6️⃣ Build DTBO
+      # 6️⃣ Build DTBO image
       - name: Build DTBO
         run: |
           cd $KERNEL_ROOT/tools/mkdtboimg
@@ -61,4 +61,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dtbo-image
-          path: $OUT_DIR/dtbo
+          path: $OUT_DIR/dtbo.img
