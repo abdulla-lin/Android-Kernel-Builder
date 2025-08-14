@@ -66,12 +66,7 @@ jobs:
             HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
-      - name: Build DTBO
-        run: |
-          mkdir -p dtbo
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out dtbo.img
-          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/dtbo.img $GITHUB_WORKSPACE/build/
-
+    
       - name: Upload Kernel + DTBO Artifacts
         uses: actions/upload-artifact@v4
         with:
