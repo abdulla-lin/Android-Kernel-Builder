@@ -29,57 +29,59 @@ jobs:
           wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
           sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
 
-      - name: Setup Neutron-Clang Toolchain
+      - name: Setup AOSP Clang Toolchain
         run: |
-          mkdir -p $HOME/toolchains/neutron-clang
-          cd $HOME/toolchains/neutron-clang
-          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
-          chmod +x antman
-          bash antman -S
+          mkdir -p $HOME/toolchains/aosp-clang
+          cd $HOME/toolchains/aosp-clang
+          curl -LO https://android.googlesource.com/toolchain/llvm_android/+archive/refs/heads/master/clang-16.0.0-linux-x86_64.tar.gz
+          tar -xzf clang-16.0.0-linux-x86_64.tar.gz
 
       - name: Set Environment Variables
         run: |
           echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
-          echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
-          echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=$HOME/toolchains/neutron-clang/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          echo "BUILD_CC=$HOME/toolchains/neutron-clang/bin/clang" >> $GITHUB_ENV
+          echo "PATH=$HOME/toolchains/aosp-clang/bin:$PATH" >> $GITHUB_ENV
+          echo "CC=$HOME/toolchains/aosp-clang/bin/clang" >> $GITHUB_ENV
+          echo "LD=$HOME/toolchains/aosp-clang/bin/ld.lld" >> $GITHUB_ENV
+          echo "AR=$HOME/toolchains/aosp-clang/bin/llvm-ar" >> $GITHUB_ENV
+          echo "RANLIB=$HOME/toolchains/aosp-clang/bin/llvm-ranlib" >> $GITHUB_ENV
+          echo "LTO_CFLAGS=-flto=thin" >> $GITHUB_ENV
+          echo "LLVM=1" >> $GITHUB_ENV
 
       - name: Build Kernel with Thin LTO
         run: |
-          # Clean previous build artifacts
           rm -rf out build
           mkdir -p out build
-          # Load defconfig only
+          # Load defconfig
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out defconfig
-          # Enable Thin LTO
+          # Enable Thin LTO in config
           sed -i 's/# CONFIG_LTO_CLANG_THIN is not set/CONFIG_LTO_CLANG_THIN=y/' out/.config
           sed -i 's/# CONFIG_KERNEL_LTO_CLANG is not set/CONFIG_KERNEL_LTO_CLANG=y/' out/.config
-          # Build kernel only
+          # Build vmlinux (Thin LTO will run)
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
-            CC=$HOME/toolchains/neutron-clang/bin/clang \
-            AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
-            NM=$HOME/toolchains/neutron-clang/bin/llvm-nm \
-            LD=$HOME/toolchains/neutron-clang/bin/ld.lld \
-            STRIP=$HOME/toolchains/neutron-clang/bin/llvm-strip \
-            OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
-            OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
-            READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
-            HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
-            HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
-            HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+            CC=$CC \
+            AR=$AR \
+            NM=$CC \
+            LD=$LD \
+            STRIP=$CC \
+            OBJCOPY=$CC \
+            OBJDUMP=$CC \
+            READELF=$CC \
             KBUILD_BUILD_USER=@ravindu644 \
             KBUILD_BUILD_HOST=github \
             SKIP_DTBO=true
-          # Copy built Image
+          # Copy boot Image
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
       - name: Verify Thin LTO
         run: |
           mkdir -p build/logs
-          $HOME/toolchains/neutron-clang/bin/llvm-readobj --symbols build/Image | grep "LTO" > build/logs/lto_check.log || echo "No LTO symbols found" > build/logs/lto_check.log
+          if $CC/bin/llvm-readobj --symbols out/vmlinux | grep -q LTO; then
+              echo "Thin LTO applied successfully" > build/logs/lto_check.log
+          else
+              echo "Thin LTO NOT applied" > build/logs/lto_check.log
+          fi
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
