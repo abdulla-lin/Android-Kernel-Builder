@@ -53,7 +53,7 @@ jobs:
         run: |
           rm -rf out build
           mkdir -p out build
-          # Copy your config from arch/arm64/configs
+          # Copy your config from arch/arm64/configs directory
           cp $GITHUB_WORKSPACE/arch/arm64/configs/config $GITHUB_WORKSPACE/out/.config
           # Validate config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
@@ -67,9 +67,9 @@ jobs:
             OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
             OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
             READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
-            HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
-            HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
-            HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+            HOSTCC=gcc \
+            HOSTCXX=g++ \
+            HOSTLD=ld \
             KBUILD_BUILD_USER=@ravindu644 \
             KBUILD_BUILD_HOST=github \
             SKIP_DTBO=true \
