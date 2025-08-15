@@ -20,7 +20,8 @@ jobs:
         sudo apt install -y \
           bc bison flex libssl-dev make git curl zip unzip \
           libncurses5-dev libncursesw5-dev \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils
+
     - name: Fetch Neutron-Clang via AntMan
       run: |
         mkdir -p $HOME/toolchains/neutron-clang
@@ -29,6 +30,7 @@ jobs:
         chmod +x antman
         ./antman -S
         echo "$HOME/toolchains/neutron-clang/bin" >> $GITHUB_PATH
+
     - name: Build kernel
       run: |
         export ARCH=arm64
@@ -42,10 +44,16 @@ jobs:
         export OBJCOPY=llvm-objcopy
         export OBJDUMP=llvm-objdump
         export STRIP=llvm-strip
-        # Use correct defconfig from your screenshot
+
+        # Optional: patch any xargs aar calls in Makefiles
+        find . -name Makefile -exec sed -i 's/\bxargs aar\b/xargs $(AR)/g' {} +
+
+        # Use your correct defconfig
         make defconfig O=out
-        # Build with full log
-        make -j$(nproc) O=out V=1 2>&1 | tee build.log
+
+        # Build kernel with verbose logging
+        make -j$(nproc) O=out V=1 AR=llvm-ar 2>&1 | tee build.log
+
     - name: Upload GKI Images
       uses: actions/upload-artifact@v4
       with:
@@ -53,7 +61,7 @@ jobs:
         path: |
           out/arch/arm64/boot/Image*
           out/arch/arm64/boot/dts/**/*.dtb
-          
+
     - name: Upload build log
       uses: actions/upload-artifact@v4
       with:
