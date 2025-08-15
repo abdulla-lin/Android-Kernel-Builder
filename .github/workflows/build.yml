@@ -1,61 +1,51 @@
-name: Build Android Kernel (GKI with Exact Clang)
+name: Build Android Kernel (Clang r487747c)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
+      with:
+        submodules: true
 
-      - name: Download Exact Clang (r487747c for Android U)
-        run: |
-          mkdir -p prebuilts/clang/host/linux-x86
-          cd prebuilts/clang/host/linux-x86
-          wget "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android14-release/clang-r487747c.tar.gz" -O clang-r487747c.tar.gz
-          tar -xf clang-r487747c.tar.gz
-          cd ../../../..
+    - name: Set up Clang r487747c
+      run: |
+        mkdir -p prebuilts/clang/host/linux-x86
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r487747c.tar.gz -O clang.tar.gz
+        tar -xf clang.tar.gz -C prebuilts/clang/host/linux-x86
+        export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
+        echo "PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH" >> $GITHUB_ENV
 
-      - name: Setup Clang Toolchain & Environment
-        run: |
-          export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export CC=clang
-          export LD=ld.lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export STRIP=llvm-strip
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git wget curl build-essential bc bison flex libssl-dev libelf-dev python3
 
-          echo "Environment set: using Clang from $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c" >> $GITHUB_ENV
-          echo "ARCH=$ARCH" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=$CROSS_COMPILE" >> $GITHUB_ENV
-          echo "CC=$CC" >> $GITHUB_ENV
-          echo "LD=$LD" >> $GITHUB_ENV
+    - name: Configure kernel
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+        make O=out gki_defconfig
 
-      - name: Verify Clang Version
-        run: |
-          echo "=== Clang Version Check ==="
-          clang --version
-          echo "=== End Version Check ==="
+    - name: Build kernel
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+        make -j$(nproc) O=out
 
-      - name: Build Kernel with gki_defconfig
-        run: |
-          make O=out gki_defconfig
-          make -j$(nproc) O=out
-
-      - name: Upload Kernel Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-build
-          path: |
-            out/arch/arm64/boot/Image.gz
-            out/arch/arm64/boot/dtbo.img
-            out/arch/arm64/boot/dtb.img
+    - name: Upload compiled kernel Image.gz-dtb
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-image
+        path: out/arch/arm64/boot/Image.gz-dtb
