@@ -1,4 +1,4 @@
-name: Build GKI Kernel (Thin LTO)
+name: Build GKI Kernel
 
 on:
   push:
@@ -49,13 +49,15 @@ jobs:
           # Append NeutronClang to About Phone kernel version
           echo "LOCALVERSION=-NeutronClang" >> $GITHUB_ENV
 
-      - name: Build Kernel with Thin LTO
+      - name: Build Kernel
         run: |
           rm -rf out build
           mkdir -p out build
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
-          sed -i 's/# CONFIG_LTO_CLANG_THIN is not set/CONFIG_LTO_CLANG_THIN=y/' out/.config
-          sed -i 's/# CONFIG_KERNEL_LTO_CLANG is not set/CONFIG_KERNEL_LTO_CLANG=y/' out/.config
+          # Use your config from /proc/config.gz
+          cp $GITHUB_WORKSPACE/config $GITHUB_WORKSPACE/out/.config
+          # Validate config
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+          # Build kernel
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=$HOME/toolchains/neutron-clang/bin/clang \
             AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
@@ -72,21 +74,11 @@ jobs:
             KBUILD_BUILD_HOST=github \
             SKIP_DTBO=true \
             LOCALVERSION=-NeutronClang
+          # Copy compiled Image
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
-
-      - name: Verify Thin LTO
-        run: |
-          mkdir -p build/logs
-          $HOME/toolchains/neutron-clang/bin/llvm-readobj --symbols build/Image | grep "LTO" > build/logs/lto_check.log || echo "No LTO symbols found" > build/logs/lto_check.log
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-build
           path: build/Image
-
-      - name: Upload LTO Check Log
-        uses: actions/upload-artifact@v4
-        with:
-          name: lto-check-log
-          path: build/logs/lto_check.log
