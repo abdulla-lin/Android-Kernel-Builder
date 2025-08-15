@@ -1,72 +1,49 @@
-name: Build GKI Kernel
+name: Build Android Kernel with NDK r27b Toolchain
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Kernel
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Kernel Source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-          ref: main
           submodules: recursive
 
-      - name: Install Dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
-            default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev libx11-dev libreadline-dev libgl1 libgl1-mesa-dev \
-            python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
-          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
-
-      - name: Setup Clang r487747c
+      - name: Prepare Toolchain
         run: |
           mkdir -p $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
           cd $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
-          curl -LO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r487747c.tar.gz
-          tar -xf clang-r487747c.tar.gz
-          cd $GITHUB_WORKSPACE
+          echo "Downloading Android NDK r27b..."
+          curl -LO https://dl.google.com/android/repository/android-ndk-r27b-linux.zip
+          unzip -q android-ndk-r27b-linux.zip
+          # Symlink clang from the NDK's LLVM directory
+          ln -s $(pwd)/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64 ./clang-ndk
+          ls -lah ./clang-ndk
 
-      - name: Set Environment Variables
+      - name: Install Build Dependencies
         run: |
-          echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
-          echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
-          echo "PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH" >> $GITHUB_ENV
-          echo "CC=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/aarch64-linux-android-" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex git make \
+            libncurses5-dev libssl-dev ccache \
+            unzip zip curl wget
 
       - name: Build Kernel
         run: |
-          mkdir -p out build
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
-            CC=$CC \
-            CROSS_COMPILE=$CROSS_COMPILE \
-            AR=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-ar \
-            NM=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-nm \
-            LD=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/ld.lld \
-            STRIP=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-strip \
-            OBJCOPY=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-objcopy \
-            OBJDUMP=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-objdump \
-            READELF=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-readelf \
-            HOSTCC=$CC \
-            HOSTCXX=$CC
-          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image* $GITHUB_WORKSPACE/build/
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-ndk/bin:$PATH
+          export CC=clang
+          echo "Using Clang version:"
+          clang --version
+          make O=out ARCH=arm64 <your_defconfig_here>
+          make -j$(nproc) O=out ARCH=arm64 CC=clang
 
-      - name: Upload Kernel Artifact
+      - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-build
-          path: build/Image*
+          name: kernel-image
+          path: out/arch/arm64/boot/Image.gz-dtb
