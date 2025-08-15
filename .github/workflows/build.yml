@@ -53,13 +53,6 @@ jobs:
           rm -rf out build
           mkdir -p out build
 
-          # Regenerate Kconfig lexer/parser to prevent "Error in reading or end of file"
-          cd scripts/kconfig
-          make clean || true
-          make lexer.lex.c
-          make parser.tab.c
-          cd $GITHUB_WORKSPACE
-
           # Load ROM config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
