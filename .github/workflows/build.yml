@@ -27,22 +27,24 @@ jobs:
               python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
           wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
           sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
-      - name: Setup Neutron-Clang Toolchain
+
+      - name: Setup ARM GNU Toolchain
         run: |
-          mkdir -p $HOME/toolchains/neutron-clang
-          cd $HOME/toolchains/neutron-clang
-          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
-          chmod +x antman
-          bash antman -S
+          mkdir -p $HOME/toolchains
+          cd $HOME/toolchains
+          wget https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+          tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+          rm -f arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+
       - name: Set Environment Variables
         run: |
           echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
-          echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
-          echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=$HOME/toolchains/neutron-clang/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          echo "BUILD_CC=$HOME/toolchains/neutron-clang/bin/clang" >> $GITHUB_ENV
+          echo "PATH=$HOME/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-none-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_COMPAT=arm-none-linux-gnueabihf-" >> $GITHUB_ENV
+
       - name: Build Kernel
         run: |
           mkdir -p out build
@@ -50,20 +52,12 @@ jobs:
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
           # Resolve any missing options
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
-          # Build kernel using Neutron-Clang
+          # Build kernel using ARM GNU Toolchain
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
-            CC=$HOME/toolchains/neutron-clang/bin/clang \
-            AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
-            NM=$HOME/toolchains/neutron-clang/bin/llvm-nm \
-            LD=$HOME/toolchains/neutron-clang/bin/ld.lld \
-            STRIP=$HOME/toolchains/neutron-clang/bin/llvm-strip \
-            OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
-            OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
-            READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
-            HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
-            HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
-            HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld
+            CROSS_COMPILE=aarch64-none-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-none-linux-gnueabihf-
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
+
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
