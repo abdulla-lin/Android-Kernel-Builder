@@ -22,14 +22,25 @@ jobs:
           libncurses5-dev libncursesw5-dev \
           gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils
 
+    - name: Cache Neutron Clang
+      uses: actions/cache@v3
+      with:
+        path: $HOME/toolchains/neutron-clang
+        key: neutron-clang-{{ runner.os }}-v1
+        restore-keys: |
+          neutron-clang-{{ runner.os }}-v1
+
     - name: Fetch Neutron-Clang via AntMan
+      if: steps.cache.outputs.cache-hit != 'true'
       run: |
         mkdir -p $HOME/toolchains/neutron-clang
         cd $HOME/toolchains/neutron-clang
         curl -LO https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman
         chmod +x antman
         ./antman -S
-        echo "$HOME/toolchains/neutron-clang/bin" >> $GITHUB_PATH
+
+    - name: Add Neutron Clang to PATH
+      run: echo "$HOME/toolchains/neutron-clang/bin" >> $GITHUB_PATH
 
     - name: Build kernel
       run: |
@@ -45,14 +56,14 @@ jobs:
         export OBJDUMP=llvm-objdump
         export STRIP=llvm-strip
 
-        # Optional: patch any xargs aar calls in Makefiles
-        find . -name Makefile -exec sed -i 's/\bxargs aar\b/xargs $(AR)/g' {} +
+        # Clean previous build artifacts
+        make O=out mrproper
 
-        # Use your correct defconfig
+        # Use correct defconfig
         make defconfig O=out
 
-        # Build kernel with verbose logging
-        make -j$(nproc) O=out V=1 AR=llvm-ar 2>&1 | tee build.log
+        # Build kernel with AR set to llvm-ar
+        make -j$(nproc) O=out AR=llvm-ar V=1 2>&1 | tee build.log
 
     - name: Upload GKI Images
       uses: actions/upload-artifact@v4
