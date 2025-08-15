@@ -1,65 +1,42 @@
-name: Build GKI Kernel
+name: Build Android Kernel (GNU 14.2 - GKI Defconfig)
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Kernel
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Kernel Source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-          ref: main
-          submodules: recursive
+          fetch-depth: 0
 
-      - name: Install Dependencies
+      - name: Setup Build Environment
         run: |
-          sudo apt update
-          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
-              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev libx11-dev libreadline-dev libgl1 libgl1-mesa-dev \
-              python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
-          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
+          sudo apt-get update
+          sudo apt-get install -y git wget unzip make python3 gcc g++ bc libncurses5-dev flex bison libssl-dev
 
-      - name: Setup ARM GNU Toolchain
+      - name: Download GNU 14.2 Toolchain
         run: |
-          mkdir -p $HOME/toolchains
-          cd $HOME/toolchains
           wget https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
           tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-          rm -f arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+          mv arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu gnu-toolchain
 
-      - name: Set Environment Variables
+      - name: Build Kernel (GKI Defconfig)
         run: |
-          echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
-          echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
-          echo "PATH=$HOME/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-none-linux-gnu-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE_COMPAT=arm-none-linux-gnueabihf-" >> $GITHUB_ENV
+          export PATH=$GITHUB_WORKSPACE/gnu-toolchain/bin:$PATH
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-none-linux-gnu-
+          mkdir -p out
+          make O=out gki_defconfig
+          make -j$(nproc) O=out
 
-      - name: Build Kernel
-        run: |
-          mkdir -p out build
-          # Load ROM config from arch/arm64/configs/config
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
-          # Resolve any missing options
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
-          # Build kernel using ARM GNU Toolchain
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
-            CROSS_COMPILE=aarch64-none-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-none-linux-gnueabihf-
-          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
-
-      - name: Upload Kernel Artifact
+      - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-build
-          path: build/Image
+          path: |
+            out/arch/arm64/boot/Image.gz
+            out/arch/arm64/boot/dtbo.img
+            out/arch/arm64/boot/dtb.img
