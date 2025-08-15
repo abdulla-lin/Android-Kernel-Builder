@@ -28,11 +28,11 @@ jobs:
           wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
           sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
 
-      - name: Download Exact Clang Toolchain
+      - name: Setup Clang r487747c Toolchain
         run: |
           mkdir -p $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
           cd $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
-          curl -LO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/clang-r487747c.tar.gz
+          curl -L -O https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/clang-r487747c.tar.gz
           tar -xzf clang-r487747c.tar.gz
           rm clang-r487747c.tar.gz
 
@@ -48,10 +48,11 @@ jobs:
       - name: Build Kernel
         run: |
           mkdir -p out build
-          # Use gki_defconfig from kernel source
+          # Load GKI config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+          # Resolve missing options
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
-          # Build kernel without LTO
+          # Build kernel using Clang r487747c
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang \
             AR=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-ar \
