@@ -53,8 +53,8 @@ jobs:
         run: |
           rm -rf out build
           mkdir -p out build
-          # Use your config from /proc/config.gz
-          cp $GITHUB_WORKSPACE/config $GITHUB_WORKSPACE/out/.config
+          # Copy your config from arch/arm64/configs
+          cp $GITHUB_WORKSPACE/arch/arm64/configs/config $GITHUB_WORKSPACE/out/.config
           # Validate config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
           # Build kernel
