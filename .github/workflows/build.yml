@@ -29,55 +29,55 @@ jobs:
           wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
           sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
 
-      - name: Download and Extract Arm GNU Toolchain
+      - name: Setup Neutron-Clang Toolchain
         run: |
-          mkdir -p $HOME/toolchains/arm-gnu
-          cd $HOME/toolchains/arm-gnu
-          curl -LO https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-          tar -xJf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+          mkdir -p $HOME/toolchains/neutron-clang
+          cd $HOME/toolchains/neutron-clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          bash antman -S
 
       - name: Set Environment Variables
         run: |
-          echo "PATH=$HOME/toolchains/arm-gnu/bin:$PATH" >> $GITHUB_ENV
-          echo "CC=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CXX=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-g++" >> $GITHUB_ENV
-          echo "LD=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-ld" >> $GITHUB_ENV
-          echo "LDFLAGS=-fuse-ld=lld" >> $GITHUB_ENV
-          echo "BUILD_CC=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
+          echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
+          echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$HOME/toolchains/neutron-clang/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "BUILD_CC=$HOME/toolchains/neutron-clang/bin/clang" >> $GITHUB_ENV
+          # Append NeutronClang to About Phone kernel version
+          echo "LOCALVERSION=-NeutronClang" >> $GITHUB_ENV
 
       - name: Build Kernel with Thin LTO
         run: |
           rm -rf out build
           mkdir -p out build
-          # Load defconfig
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out defconfig
-          # Enable Thin LTO
           sed -i 's/# CONFIG_LTO_CLANG_THIN is not set/CONFIG_LTO_CLANG_THIN=y/' out/.config
           sed -i 's/# CONFIG_KERNEL_LTO_CLANG is not set/CONFIG_KERNEL_LTO_CLANG=y/' out/.config
-          # Build kernel
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
-            CC=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-gcc \
-            AR=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-ar \
-            NM=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-nm \
-            LD=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-ld \
-            STRIP=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-strip \
-            OBJCOPY=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-objcopy \
-            OBJDUMP=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-objdump \
-            READELF=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-readelf \
-            HOSTCC=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-gcc \
-            HOSTCXX=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-g++ \
-            HOSTLD=$HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-ld \
+            CC=$HOME/toolchains/neutron-clang/bin/clang \
+            AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
+            NM=$HOME/toolchains/neutron-clang/bin/llvm-nm \
+            LD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+            STRIP=$HOME/toolchains/neutron-clang/bin/llvm-strip \
+            OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
+            OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
+            READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
+            HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
+            HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
+            HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld \
             KBUILD_BUILD_USER=@ravindu644 \
             KBUILD_BUILD_HOST=github \
-            SKIP_DTBO=true
+            SKIP_DTBO=true \
+            LOCALVERSION=-NeutronClang
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
       - name: Verify Thin LTO
         run: |
           mkdir -p build/logs
-          $HOME/toolchains/arm-gnu/bin/aarch64-none-linux-gnu-llvm-readobj --symbols build/Image | grep "LTO" > build/logs/lto_check.log || echo "No LTO symbols found" > build/logs/lto_check.log
+          $HOME/toolchains/neutron-clang/bin/llvm-readobj --symbols build/Image | grep "LTO" > build/logs/lto_check.log || echo "No LTO symbols found" > build/logs/lto_check.log
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
