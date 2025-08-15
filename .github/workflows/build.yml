@@ -1,70 +1,94 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang)
+name: Build GKI Kernel (Thin LTO)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build:
+    name: Build Kernel
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout kernel source
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: main
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v3
+        with:
+          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+          ref: main
+          submodules: recursive
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y \
-          bc bison flex libssl-dev make git curl zip unzip \
-          libncurses5-dev libncursesw5-dev \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full \
+              android-sdk-libsparse-utils erofs-utils default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
+              libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod \
+              openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
+          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
+          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
 
-    - name: Fetch Neutron-Clang via AntMan
-      run: |
-        mkdir -p $HOME/toolchains/neutron-clang
-        cd $HOME/toolchains/neutron-clang
-        curl -LO https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman
-        chmod +x antman
-        ./antman -S
-        echo "$HOME/toolchains/neutron-clang/bin" >> $GITHUB_PATH
+      - name: Setup Neutron-Clang Toolchain
+        run: |
+          mkdir -p $HOME/toolchains/neutron-clang
+          cd $HOME/toolchains/neutron-clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          bash antman -S
 
-    - name: Build kernel
-      run: |
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CC=clang
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-        export LD=ld.lld
-        export AR=llvm-ar
-        export NM=llvm-nm
-        export OBJCOPY=llvm-objcopy
-        export OBJDUMP=llvm-objdump
-        export STRIP=llvm-strip
-        # Clean previous build artifacts
-        make O=out mrproper
-        # Device-specific defconfig
-        make defconfig O=out
-        # Enable Thin LTO (from defconfig)
-        make -j$(nproc) O=out Image dtbs V=1 2>&1 | tee build.log
+      - name: Set Environment Variables
+        run: |
+          echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
+          echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
+          echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$HOME/toolchains/neutron-clang/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "BUILD_CC=$HOME/toolchains/neutron-clang/bin/clang" >> $GITHUB_ENV
 
-    - name: Package kernel artifacts
-      run: |
-        mkdir -p artifacts
-        cp out/arch/arm64/boot/Image artifacts/
-        cp -r out/arch/arm64/boot/dts artifacts/dtbs
+      - name: Build Kernel with Thin LTO
+        run: |
+          # Clean previous build artifacts
+          rm -rf out build
+          mkdir -p out build
+          # Load defconfig only
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out defconfig
+          # Enable Thin LTO
+          sed -i 's/# CONFIG_LTO_CLANG_THIN is not set/CONFIG_LTO_CLANG_THIN=y/' out/.config
+          sed -i 's/# CONFIG_KERNEL_LTO_CLANG is not set/CONFIG_KERNEL_LTO_CLANG=y/' out/.config
+          # Build kernel only
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
+            CC=$HOME/toolchains/neutron-clang/bin/clang \
+            AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
+            NM=$HOME/toolchains/neutron-clang/bin/llvm-nm \
+            LD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+            STRIP=$HOME/toolchains/neutron-clang/bin/llvm-strip \
+            OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
+            OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
+            READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
+            HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
+            HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
+            HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+            KBUILD_BUILD_USER=@ravindu644 \
+            KBUILD_BUILD_HOST=github \
+            SKIP_DTBO=true
+          # Copy built Image
+          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
-    - name: Upload Kernel Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: cmf1-kernel-artifacts
-        path: artifacts/
+      - name: Verify Thin LTO
+        run: |
+          mkdir -p build/logs
+          $HOME/toolchains/neutron-clang/bin/llvm-readobj --symbols build/Image | grep "LTO" > build/logs/lto_check.log || echo "No LTO symbols found" > build/logs/lto_check.log
 
-    - name: Upload build log
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel-build-log
-        path: build.log
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build
+          path: build/Image
+
+      - name: Upload LTO Check Log
+        uses: actions/upload-artifact@v4
+        with:
+          name: lto-check-log
+          path: build/logs/lto_check.log
