@@ -21,6 +21,7 @@ jobs:
           bc bison flex libssl-dev make git curl zip unzip \
           libncurses5-dev libncursesw5-dev \
           gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
     - name: Fetch Neutron-Clang via AntMan
       run: |
         mkdir -p $HOME/toolchains/neutron-clang
@@ -29,6 +30,7 @@ jobs:
         chmod +x antman
         ./antman -S
         echo "$HOME/toolchains/neutron-clang/bin" >> $GITHUB_PATH
+
     - name: Build kernel
       run: |
         export ARCH=arm64
@@ -42,18 +44,32 @@ jobs:
         export OBJCOPY=llvm-objcopy
         export OBJDUMP=llvm-objdump
         export STRIP=llvm-strip
-        # Use correct defconfig from your screenshot
+
+        # Enable LTO
+        export LDFLAGS="-flto"
+
+        # Clean previous build artifacts
+        make O=out mrproper
+
+        # Use device-specific defconfig
         make defconfig O=out
-        # Build with full log
-        make -j$(nproc) O=out V=1 2>&1 | tee build.log
-    - name: Upload GKI Images
+
+        # Full build: kernel, dtbs, modules
+        make -j$(nproc) O=out Image dtbs modules V=1 2>&1 | tee build.log
+
+    - name: Package artifacts
+      run: |
+        mkdir -p artifacts
+        cp out/arch/arm64/boot/Image artifacts/
+        cp -r out/arch/arm64/boot/dts artifacts/dtbs
+        cp -r out/modules artifacts/modules
+
+    - name: Upload Kernel Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: cmf1-gki-images
-        path: |
-          out/arch/arm64/boot/Image*
-          out/arch/arm64/boot/dts/**/*.dtb
-          
+        name: cmf1-kernel-artifacts
+        path: artifacts/
+
     - name: Upload build log
       uses: actions/upload-artifact@v4
       with:
