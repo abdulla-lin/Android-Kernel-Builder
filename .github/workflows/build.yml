@@ -22,11 +22,13 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
-              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev libx11-dev libreadline-dev libgl1 libgl1-mesa-dev \
-              python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
+          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full \
+              android-sdk-libsparse-utils erofs-utils default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
+              libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod \
+              openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
           wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
           sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
+
       - name: Setup Neutron-Clang Toolchain
         run: |
           mkdir -p $HOME/toolchains/neutron-clang
@@ -34,6 +36,7 @@ jobs:
           curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
           chmod +x antman
           bash antman -S
+
       - name: Set Environment Variables
         run: |
           echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
@@ -43,13 +46,24 @@ jobs:
           echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=$HOME/toolchains/neutron-clang/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
           echo "BUILD_CC=$HOME/toolchains/neutron-clang/bin/clang" >> $GITHUB_ENV
+
       - name: Build Kernel
         run: |
+          # Clean previous build artifacts
+          rm -rf out build
           mkdir -p out build
-          # Load ROM config from arch/arm64/configs/config
+
+          # Regenerate Kconfig lexer/parser to prevent "Error in reading or end of file"
+          cd scripts/kconfig
+          make clean || true
+          make lexer.lex.c
+          make parser.tab.c
+          cd $GITHUB_WORKSPACE
+
+          # Load ROM config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
-          # Resolve any missing options
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+
           # Build kernel using Neutron-Clang
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=$HOME/toolchains/neutron-clang/bin/clang \
@@ -63,7 +77,10 @@ jobs:
             HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
             HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
             HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld
+
+          # Copy built Image to build folder
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
+
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
