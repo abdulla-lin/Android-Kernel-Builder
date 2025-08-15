@@ -57,7 +57,7 @@ jobs:
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
 
-          # Build kernel using Neutron-Clang
+          # Build kernel only (skip DTBO and unnecessary DTBs)
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=$HOME/toolchains/neutron-clang/bin/clang \
             AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
@@ -69,7 +69,11 @@ jobs:
             READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
             HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
             HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
-            HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld
+            HOSTLD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+            KBUILD_BUILD_USER=@ravindu644 \
+            KBUILD_BUILD_HOST=github \
+            # Skip building DTBO/DTS
+            SKIP_DTBO=true
 
           # Copy built Image to build folder
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
