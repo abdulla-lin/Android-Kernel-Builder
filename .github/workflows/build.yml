@@ -23,18 +23,18 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
-              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev libx11-dev libreadline-dev libgl1 libgl1-mesa-dev \
-              python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
+            default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev libx11-dev libreadline-dev libgl1 libgl1-mesa-dev \
+            python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
           wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
           sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
 
-      - name: Setup Clang r487747c Toolchain
+      - name: Setup Clang r487747c
         run: |
           mkdir -p $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
           cd $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
-          curl -L -O https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/clang-r487747c.tar.gz
-          tar -xzf clang-r487747c.tar.gz
-          rm clang-r487747c.tar.gz
+          curl -LO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r487747c.tar.gz
+          tar -xf clang-r487747c.tar.gz
+          cd $GITHUB_WORKSPACE
 
       - name: Set Environment Variables
         run: |
@@ -42,19 +42,18 @@ jobs:
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
           echo "PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH" >> $GITHUB_ENV
-          echo "BUILD_CC=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang" >> $GITHUB_ENV
+          echo "CC=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/aarch64-linux-android-" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Build Kernel
         run: |
           mkdir -p out build
-          # Load GKI config
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
-          # Resolve missing options
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
-          # Build kernel using Clang r487747c
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
-            CC=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang \
+            CC=$CC \
+            CROSS_COMPILE=$CROSS_COMPILE \
             AR=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-ar \
             NM=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-nm \
             LD=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/ld.lld \
@@ -62,13 +61,12 @@ jobs:
             OBJCOPY=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-objcopy \
             OBJDUMP=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-objdump \
             READELF=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-readelf \
-            HOSTCC=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang \
-            HOSTCXX=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang++ \
-            HOSTLD=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/ld.lld
-          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
+            HOSTCC=$CC \
+            HOSTCXX=$CC
+          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image* $GITHUB_WORKSPACE/build/
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-build
-          path: build/Image
+          path: build/Image*
