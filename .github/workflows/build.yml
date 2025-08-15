@@ -1,46 +1,73 @@
-name: Build Android Kernel (Exact Clang r487747c)
+name: Build GKI Kernel
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build:
+    name: Build Kernel
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Source
-        uses: actions/checkout@v4
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v3
         with:
-          submodules: true
-          fetch-depth: 1
+          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+          ref: main
+          submodules: recursive
 
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc bison flex gcc clang lld git zip curl wget make python3
+          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
+              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev libx11-dev libreadline-dev libgl1 libgl1-mesa-dev \
+              python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
+          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
+          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
 
-      - name: Download Exact Clang r487747c
+      - name: Download Exact Clang Toolchain
         run: |
-          mkdir -p prebuilts/clang/host/linux-x86
-          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android14-release/clang-r487747c.tar.gz -O clang-r487747c.tar.gz
-          tar -C prebuilts/clang/host/linux-x86 -xzf clang-r487747c.tar.gz
+          mkdir -p $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
+          cd $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
+          curl -LO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/clang-r487747c.tar.gz
+          tar -xzf clang-r487747c.tar.gz
           rm clang-r487747c.tar.gz
 
-      - name: Set Clang Path
+      - name: Set Environment Variables
         run: |
-          export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
+          echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
           echo "PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH" >> $GITHUB_ENV
+          echo "BUILD_CC=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Build Kernel
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=clang
-          make O=out gki_defconfig
-          make -j$(nproc) O=out
+          mkdir -p out build
+          # Use gki_defconfig from kernel source
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+          # Build kernel without LTO
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
+            CC=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang \
+            AR=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-ar \
+            NM=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-nm \
+            LD=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/ld.lld \
+            STRIP=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-strip \
+            OBJCOPY=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-objcopy \
+            OBJDUMP=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-objdump \
+            READELF=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-readelf \
+            HOSTCC=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang \
+            HOSTCXX=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang++ \
+            HOSTLD=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin/ld.lld
+          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
-      - name: Upload Kernel
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: compiled-kernel
-          path: out/arch/arm64/boot/Image.gz-dtb
+          name: kernel-build
+          path: build/Image
