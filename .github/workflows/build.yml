@@ -48,7 +48,7 @@ jobs:
         run: |
           mkdir -p out build
           # Load kernel source defconfig
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out cmf_defconfig
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
           # Resolve any missing options
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
           # Build kernel
