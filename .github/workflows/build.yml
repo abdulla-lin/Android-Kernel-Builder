@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout kernel source
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
@@ -19,56 +20,69 @@ jobs:
           ref: main
           submodules: recursive
 
+      # 2️⃣ Install dependencies
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
-              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev libx11-dev libreadline-dev libgl1 libgl1-mesa-dev \
-              python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
-          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
+          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk \
+              gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
+              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
+              libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc \
+              libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd
 
-      - name: Download Android NDK r27b
+      # 3️⃣ Download and unzip exact NDK r27b
+      - name: Setup Android NDK r27b
         run: |
           mkdir -p $GITHUB_WORKSPACE/ndk
-          curl -L -o $GITHUB_WORKSPACE/ndk/android-ndk-r27b-linux.zip https://dl.google.com/android/repository/android-ndk-r27b-linux.zip
-          unzip $GITHUB_WORKSPACE/ndk/android-ndk-r27b-linux.zip -d $GITHUB_WORKSPACE/ndk
+          curl -L https://dl.google.com/android/repository/android-ndk-r27b-linux.zip -o ndk-r27b.zip
+          unzip ndk-r27b.zip -d $GITHUB_WORKSPACE/ndk
+          rm ndk-r27b.zip
+          echo "NDK_PATH=$GITHUB_WORKSPACE/ndk/android-ndk-r27b" >> $GITHUB_ENV
+          echo "PATH=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH" >> $GITHUB_ENV
 
+      # 4️⃣ Set kernel build environment variables
       - name: Set Environment Variables
         run: |
           echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
-          echo "PATH=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH" >> $GITHUB_ENV
-          echo "CC=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
-          echo "CXX=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" >> $GITHUB_ENV
-          echo "LD=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin/ld" >> $GITHUB_ENV
+          echo "CC=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> $GITHUB_ENV
+          echo "CXX=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" >> $GITHUB_ENV
 
+      # 5️⃣ Build Kernel
       - name: Build Kernel
         run: |
           mkdir -p out build
-          # Load kernel source defconfig
+
+          # Clean any previous build
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out mrproper
+
+          # Load GKI defconfig
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
-          # Resolve any missing options
+
+          # Resolve missing options
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
-          # Build kernel
+
+          # Build kernel for arm64 target
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
-            CC=$CC \
-            CXX=$CXX \
-            LD=$LD \
-            AR=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar \
-            NM=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm \
-            STRIP=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
-            OBJCOPY=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy \
-            OBJDUMP=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump \
-            READELF=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf \
-            HOSTCC=$CC \
-            HOSTCXX=$CXX \
-            HOSTLD=$LD
+              CC=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
+              CXX=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ \
+              AR=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar \
+              NM=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm \
+              STRIP=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
+              OBJCOPY=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy \
+              OBJDUMP=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump \
+              READELF=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf \
+              HOSTCC=gcc \
+              HOSTCXX=g++ \
+              HOSTLD=ld
+
+          # Copy built Image
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
+      # 6️⃣ Upload Kernel Artifact
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-build
-          path: build/Image of 
+          path: build/Image
