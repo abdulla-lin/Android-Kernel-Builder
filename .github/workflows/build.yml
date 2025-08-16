@@ -58,7 +58,7 @@ jobs:
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out mrproper
 
           # Load GKI defconfig
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out defconfig
 
           # Resolve missing options
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
