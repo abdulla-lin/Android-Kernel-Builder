@@ -48,7 +48,7 @@ jobs:
       - name: Clean and Prepare Build
         run: |
           make mrproper
-          make gki_defconfig
+          make defconfig
 
       - name: Build Kernel and DTB
         run: |
