@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout kernel source
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
@@ -19,50 +20,60 @@ jobs:
           ref: main
           submodules: recursive
 
+      # 2️⃣ Install dependencies
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
-              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev libx11-dev libreadline-dev libgl1 libgl1-mesa-dev \
-              python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
-          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
-
-      - name: Setup Prebuilts Clang r487747c
+          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk \
+              gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
+              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
+              libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc \
+              libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd
+      # 3️⃣ Download and unzip exact NDK r27b
+      - name: Setup Android NDK r27b
         run: |
-          mkdir -p $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
-          cd $GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86
-          curl -LO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r487747c.tar.gz
-          tar -xvf clang-r487747c.tar.gz
-          rm clang-r487747c.tar.gz
-
+          mkdir -p $GITHUB_WORKSPACE/ndk
+          curl -L https://dl.google.com/android/repository/android-ndk-r27b-linux.zip -o ndk-r27b.zip
+          unzip ndk-r27b.zip -d $GITHUB_WORKSPACE/ndk
+          rm ndk-r27b.zip
+          echo "NDK_PATH=$GITHUB_WORKSPACE/ndk/android-ndk-r27b" >> $GITHUB_ENV
+          echo "PATH=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH" >> $GITHUB_ENV
+      # 4️⃣ Set kernel build environment variables
       - name: Set Environment Variables
         run: |
           echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-android-" >> $GITHUB_ENV
-          echo "PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH" >> $GITHUB_ENV
-          echo "HOSTCC=gcc" >> $GITHUB_ENV
-          echo "HOSTCXX=g++" >> $GITHUB_ENV
-
-      - name: Clean and Prepare Build
+          echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
+          echo "CC=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> $GITHUB_ENV
+          echo "CXX=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" >> $GITHUB_ENV
+      # 5️⃣ Build Kernel
+      - name: Build Kernel
         run: |
-          make mrproper
-          make defconfig
-
-      - name: Build Kernel and DTB
-        run: |
-          mkdir -p build out
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out HOSTCC=gcc HOSTCXX=g++ -j$(nproc)
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out CC=clang AR=llvm-ar NM=llvm-nm LD=ld.lld STRIP=llvm-strip OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf -j$(nproc)
-
-      - name: Copy Kernel Image and DTB
-        run: |
+          mkdir -p out build
+          # Clean any previous build
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out mrproper
+          # Load GKI defconfig
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
+          # Resolve missing options
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+          # Build kernel for arm64 target
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
+              CC=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
+              CXX=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ \
+              AR=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar \
+              NM=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm \
+              STRIP=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
+              OBJCOPY=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy \
+              OBJDUMP=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump \
+              READELF=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf \
+              HOSTCC=gcc \
+              HOSTCXX=g++ \
+              HOSTLD=ld
+          # Copy built Image
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
-          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/dts/qcom/YOUR_DEVICE.dtb $GITHUB_WORKSPACE/build/
-
+      # 6️⃣ Upload Kernel Artifact
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-build
-          path: build/
+          path: build/Image
