@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build Kernel
+    name: Build Kernel + DTBs
     runs-on: ubuntu-latest
 
     steps:
@@ -29,7 +29,8 @@ jobs:
               default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
               libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc \
               libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd
-      # 3️⃣ Download and unzip exact NDK r27b
+
+      # 3️⃣ Setup Android NDK r27b
       - name: Setup Android NDK r27b
         run: |
           mkdir -p $GITHUB_WORKSPACE/ndk
@@ -38,7 +39,8 @@ jobs:
           rm ndk-r27b.zip
           echo "NDK_PATH=$GITHUB_WORKSPACE/ndk/android-ndk-r27b" >> $GITHUB_ENV
           echo "PATH=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH" >> $GITHUB_ENV
-      # 4️⃣ Set kernel build environment variables
+
+      # 4️⃣ Set environment variables
       - name: Set Environment Variables
         run: |
           echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
@@ -46,17 +48,14 @@ jobs:
           echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
           echo "CC=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> $GITHUB_ENV
           echo "CXX=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" >> $GITHUB_ENV
-      # 5️⃣ Build Kernel
+
+      # 5️⃣ Build kernel
       - name: Build Kernel
         run: |
           mkdir -p out build
-          # Clean any previous build
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out mrproper
-          # Load GKI defconfig
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
-          # Resolve missing options
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
-          # Build kernel for arm64 target
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
               CC=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
               CXX=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ \
@@ -69,11 +68,26 @@ jobs:
               HOSTCC=gcc \
               HOSTCXX=g++ \
               HOSTLD=ld
-          # Copy built Image
           cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
-      # 6️⃣ Upload Kernel Artifact
+
+      # 6️⃣ Build DTBs
+      - name: Build Device Tree Blobs
+        run: |
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out dtbs -j$(nproc)
+          mkdir -p $GITHUB_WORKSPACE/build/dtb
+          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/dts/vendor/qcom/*.dtb $GITHUB_WORKSPACE/build/dtb/
+
+      # 7️⃣ Optional: Combine kernel + dtb
+      - name: Combine Kernel + DTBs (Optional)
+        run: |
+          cat $GITHUB_WORKSPACE/build/Image $GITHUB_WORKSPACE/build/dtb/*.dtb > $GITHUB_WORKSPACE/build/Image.gz-dtb
+
+      # 8️⃣ Upload artifacts
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-build
-          path: build/Image
+          path: |
+            build/Image
+            build/dtb
+            build/Image.gz-dtb
