@@ -1,12 +1,15 @@
-name: Build GKI Kernel (AnyKernel3 + Modules)
+name: Build GKI Kernel (AnyKernel3)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Kernel
     runs-on: ubuntu-latest
+    name: Build Kernel
 
     steps:
       - name: Checkout Kernel Source
@@ -23,8 +26,6 @@ jobs:
               android-sdk-libsparse-utils erofs-utils default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
               libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod \
               openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
-          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
 
       - name: Setup Neutron-Clang Toolchain
         run: |
@@ -37,21 +38,28 @@ jobs:
       - name: Set Environment Variables
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=github" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=actions" >> $GITHUB_ENV
           echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_USER=cmf" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_HOST=github" >> $GITHUB_ENV
           echo "LOCALVERSION=-NeutronClang" >> $GITHUB_ENV
 
-      - name: Build Kernel (Image.gz-dtb + modules)
+      - name: Configure Kernel
         run: |
           rm -rf out build
           mkdir -p out build
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out defconfig
+          # Disable IPv6 multicast routing to skip mcast_snoop.o build error
+          scripts/config --file out/.config -d IPV6_MROUTE
+          scripts/config --file out/.config -d IPV6_MROUTE_MULTIPLE_TABLES
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+
+      - name: Build Kernel (Image + dtb)
+        run: |
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=clang \
+            LD=ld.lld \
             AR=llvm-ar \
             NM=llvm-nm \
-            LD=ld.lld \
             STRIP=llvm-strip \
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
@@ -59,46 +67,25 @@ jobs:
             HOSTCC=clang \
             HOSTCXX=clang++ \
             HOSTLD=ld.lld
+          cp out/arch/arm64/boot/Image build/
+          cp out/arch/arm64/boot/dts/vendor/*.dtb build/ || true
 
-          # Copy kernel image
-          cp out/arch/arm64/boot/Image.gz-dtb build/
-
-          # Build modules
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) modules \
-            CC=clang LD=ld.lld
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) modules_install \
-            INSTALL_MOD_PATH=$GITHUB_WORKSPACE/modules \
-            INSTALL_MOD_STRIP=1
-
-          # Prepare vendor modules dir
-          mkdir -p build/vendor/lib/modules
-          cp -r modules/lib/modules/* build/vendor/lib/modules/
-
-      - name: Prepare AnyKernel3
+      - name: Clone AnyKernel3
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel
-          cp build/Image.gz-dtb AnyKernel/
-          mkdir -p AnyKernel/modules/vendor/lib/modules
-          cp -r build/vendor/lib/modules/* AnyKernel/modules/vendor/lib/modules/
-          sed -i 's/kernelstring=.*/kernelstring="CMF GKI Kernel - NeutronClang"/' AnyKernel/anykernel.sh
-          cd AnyKernel
-          zip -r9 ../Kernel-AnyKernel.zip *
+          git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          cp build/Image AnyKernel3/
+          cp build/*.dtb AnyKernel3/ || true
+          cd AnyKernel3 && zip -r9 ../Kernel-Flashable.zip *
 
-      - name: Upload Raw Kernel
+      - name: Upload Raw Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: raw-kernel
-          path: build/Image.gz-dtb
+          name: raw-kernel-build
+          path: build/*
 
-      - name: Upload Vendor Modules
+      - name: Upload AnyKernel3 Zip
         uses: actions/upload-artifact@v4
         with:
-          name: vendor-modules
-          path: build/vendor/lib/modules
-
-      - name: Upload Flashable AnyKernel3 Zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: flashable-kernel
-          path: Kernel-AnyKernel.zip
+          name: flashable-zip
+          path: Kernel-Flashable.zip
           
