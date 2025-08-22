@@ -1,4 +1,4 @@
-name: Build GKI Kernel (AnyKernel3)
+name: Build GKI Kernel (AnyKernel3 with Modules)
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Build Kernel
+    name: Build Kernel + Modules
 
     steps:
       - name: Checkout Kernel Source
@@ -23,9 +23,9 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full \
-              android-sdk-libsparse-utils erofs-utils default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
-              libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod \
-              openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
+            android-sdk-libsparse-utils erofs-utils default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
+            libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod \
+            openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
 
       - name: Setup Neutron-Clang Toolchain
         run: |
@@ -45,16 +45,14 @@ jobs:
 
       - name: Configure Kernel
         run: |
-          rm -rf out build
-          mkdir -p out build
-          # Use gki_defconfig (recommended for GKI builds)
+          rm -rf out build modules_out
+          mkdir -p out build modules_out
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
-          # Disable IPv6 multicast routing to avoid build error
           scripts/config --file out/.config -d IPV6_MROUTE
           scripts/config --file out/.config -d IPV6_MROUTE_MULTIPLE_TABLES
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
 
-      - name: Build Kernel (Image + dtb + modules)
+      - name: Build Kernel (Image + dtb)
         run: |
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=clang \
@@ -67,29 +65,16 @@ jobs:
             READELF=llvm-readelf \
             HOSTCC=clang \
             HOSTCXX=clang++ \
-            HOSTLD=ld.lld
+            HOSTLD=ld.lld Image.gz-dtb dtbs
 
-          # Handle kernel image formats
-          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-            cp out/arch/arm64/boot/Image.gz-dtb build/
-          elif [ -f out/arch/arm64/boot/Image.gz ]; then
-            cp out/arch/arm64/boot/Image.gz build/
-            mv build/Image.gz build/Image.gz-dtb
-          elif [ -f out/arch/arm64/boot/Image ]; then
-            cp out/arch/arm64/boot/Image build/
-            gzip -9 build/Image
-            mv build/Image.gz build/Image.gz-dtb
-          fi
-
-          # Copy dtb.img if available
+          cp out/arch/arm64/boot/Image.gz-dtb build/ || true
           cp out/arch/arm64/boot/dtb.img build/ || true
-
-          # Copy raw dtbs
           cp out/arch/arm64/boot/dts/vendor/*.dtb build/ || true
 
-          # Copy built modules
-          mkdir -p build/modules
-          find out/ -name "*.ko" -exec cp {} build/modules/ \; || true
+      - name: Build Kernel Modules
+        run: |
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) modules
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out INSTALL_MOD_PATH=$GITHUB_WORKSPACE/modules_out modules_install
 
       - name: Clone AnyKernel3 and Package
         run: |
@@ -99,15 +84,13 @@ jobs:
           # Copy kernel image
           cp build/Image.gz-dtb AnyKernel3/
 
-          # Copy dtb.img if available
+          # Copy dtb files
           cp build/dtb.img AnyKernel3/ || true
-
-          # Copy dtbs
           cp build/*.dtb AnyKernel3/ || true
 
-          # Copy modules
-          mkdir -p AnyKernel3/modules/vendor/lib/modules
-          cp -r build/modules/* AnyKernel3/modules/vendor/lib/modules/ || true
+          # Copy built modules (with proper structure)
+          mkdir -p AnyKernel3/modules/lib/modules
+          cp -r modules_out/lib/modules/* AnyKernel3/modules/lib/modules/
 
           cd AnyKernel3 && zip -r9 ../Kernel-Flashable.zip *
 
@@ -116,6 +99,12 @@ jobs:
         with:
           name: raw-kernel-build
           path: build/*
+
+      - name: Upload Modules
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-modules
+          path: modules_out/lib/modules/**
 
       - name: Upload AnyKernel3 Zip
         uses: actions/upload-artifact@v4
