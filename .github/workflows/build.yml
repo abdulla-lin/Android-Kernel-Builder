@@ -1,88 +1,125 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang + AnyKernel3)
+name: Build GKI Kernel (AnyKernel3)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    name: Build Kernel
 
     steps:
-    - name: Checkout kernel source
-      uses: actions/checkout@v4
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v3
+        with:
+          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+          ref: main
+          submodules: recursive
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y git wget curl build-essential bc bison flex \
-          libssl-dev ccache python3 python3-pip zip unzip zstd
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full \
+              android-sdk-libsparse-utils erofs-utils default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
+              libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod \
+              openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
 
-    - name: Setup Neutron Clang Toolchain
-      run: |
-        mkdir -p $HOME/toolchains/neutron-clang
-        cd $HOME/toolchains/neutron-clang
-        curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
-        chmod +x antman
-        ./antman -S
+      - name: Setup Neutron-Clang Toolchain
+        run: |
+          mkdir -p $HOME/toolchains/neutron-clang
+          cd $HOME/toolchains/neutron-clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          bash antman -S
 
-    - name: Build Kernel
-      run: |
-        export PATH=$HOME/toolchains/neutron-clang/bin:$PATH
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export KBUILD_BUILD_USER=github
-        export KBUILD_BUILD_HOST=actions
+      - name: Set Environment Variables
+        run: |
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=github" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=actions" >> $GITHUB_ENV
+          echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
+          echo "LOCALVERSION=-NeutronClang" >> $GITHUB_ENV
 
-        mkdir -p out
+      - name: Configure Kernel
+        run: |
+          rm -rf out build
+          mkdir -p out build
+          # Use gki_defconfig (recommended for GKI builds)
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+          # Disable IPv6 multicast routing to avoid build error
+          scripts/config --file out/.config -d IPV6_MROUTE
+          scripts/config --file out/.config -d IPV6_MROUTE_MULTIPLE_TABLES
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
 
-        # gki_defconfig
-        make O=out gki_defconfig CC=clang
+      - name: Build Kernel (Image + dtb + modules)
+        run: |
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            STRIP=llvm-strip \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            READELF=llvm-readelf \
+            HOSTCC=clang \
+            HOSTCXX=clang++ \
+            HOSTLD=ld.lld
 
-        # Build kernel + modules
-        make -j$(nproc --all) O=out \
-          CC=clang \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-          LLVM=1 LLVM_IAS=1
+          # Handle kernel image formats
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp out/arch/arm64/boot/Image.gz-dtb build/
+          elif [ -f out/arch/arm64/boot/Image.gz ]; then
+            cp out/arch/arm64/boot/Image.gz build/
+            mv build/Image.gz build/Image.gz-dtb
+          elif [ -f out/arch/arm64/boot/Image ]; then
+            cp out/arch/arm64/boot/Image build/
+            gzip -9 build/Image
+            mv build/Image.gz build/Image.gz-dtb
+          fi
 
-    - name: Prepare AnyKernel3
-      run: |
-        git clone https://github.com/osm0sis/AnyKernel3.git
-        cd AnyKernel3
-        rm -rf .git
+          # Copy dtb.img if available
+          cp out/arch/arm64/boot/dtb.img build/ || true
 
-        # Pick kernel image (auto-compress if only raw Image exists)
-        if [ -f ../out/arch/arm64/boot/Image.gz-dtb ]; then
-          cp ../out/arch/arm64/boot/Image.gz-dtb .
-        elif [ -f ../out/arch/arm64/boot/Image.gz ]; then
-          cp ../out/arch/arm64/boot/Image.gz .
-          mv Image.gz Image.gz-dtb
-        elif [ -f ../out/arch/arm64/boot/Image ]; then
-          cp ../out/arch/arm64/boot/Image .
-          gzip -9 Image
-          mv Image.gz Image.gz-dtb
-        else
-          echo "❌ No kernel image found!"
-          exit 1
-        fi
+          # Copy raw dtbs
+          cp out/arch/arm64/boot/dts/vendor/*.dtb build/ || true
 
-        # Copy dtb.img if available
-        if [ -f ../out/arch/arm64/boot/dtb.img ]; then
-          cp ../out/arch/arm64/boot/dtb.img .
-        fi
+          # Copy built modules
+          mkdir -p build/modules
+          find out/ -name "*.ko" -exec cp {} build/modules/ \; || true
 
-        # Create modules dir
-        mkdir -p modules/vendor/lib/modules
+      - name: Clone AnyKernel3 and Package
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          rm -rf AnyKernel3/.git
 
-        # Copy all built modules (.ko files)
-        find ../out/ -name "*.ko" -exec cp {} modules/vendor/lib/modules/ \; || true
+          # Copy kernel image
+          cp build/Image.gz-dtb AnyKernel3/
 
-        # Zip the AnyKernel3 package
-        zip -r9 ../CMF1-Kernel-AK3.zip *
+          # Copy dtb.img if available
+          cp build/dtb.img AnyKernel3/ || true
 
-    - name: Upload flashable zip
-      uses: actions/upload-artifact@v4
-      with:
-        name: CMF1-Kernel-Flashable
-        path: CMF1-Kernel-AK3.zip
-        
+          # Copy dtbs
+          cp build/*.dtb AnyKernel3/ || true
+
+          # Copy modules
+          mkdir -p AnyKernel3/modules/vendor/lib/modules
+          cp -r build/modules/* AnyKernel3/modules/vendor/lib/modules/ || true
+
+          cd AnyKernel3 && zip -r9 ../Kernel-Flashable.zip *
+
+      - name: Upload Raw Kernel Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-kernel-build
+          path: build/*
+
+      - name: Upload AnyKernel3 Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashable-zip
+          path: Kernel-Flashable.zip
+          
