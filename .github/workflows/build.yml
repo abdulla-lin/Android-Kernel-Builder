@@ -51,13 +51,30 @@ jobs:
         cd AnyKernel3
         rm -rf .git
 
-        # Copy kernel image
-        cp ../out/arch/arm64/boot/Image.gz-dtb .
+        # Pick kernel image (auto-compress if only raw Image exists)
+        if [ -f ../out/arch/arm64/boot/Image.gz-dtb ]; then
+          cp ../out/arch/arm64/boot/Image.gz-dtb .
+        elif [ -f ../out/arch/arm64/boot/Image.gz ]; then
+          cp ../out/arch/arm64/boot/Image.gz .
+          mv Image.gz Image.gz-dtb
+        elif [ -f ../out/arch/arm64/boot/Image ]; then
+          cp ../out/arch/arm64/boot/Image .
+          gzip -9 Image
+          mv Image.gz Image.gz-dtb
+        else
+          echo "❌ No kernel image found!"
+          exit 1
+        fi
+
+        # Copy dtb.img if available
+        if [ -f ../out/arch/arm64/boot/dtb.img ]; then
+          cp ../out/arch/arm64/boot/dtb.img .
+        fi
 
         # Create modules dir
         mkdir -p modules/vendor/lib/modules
 
-        # Copy all built modules (.ko files) if any exist
+        # Copy all built modules (.ko files)
         find ../out/ -name "*.ko" -exec cp {} modules/vendor/lib/modules/ \; || true
 
         # Zip the AnyKernel3 package
