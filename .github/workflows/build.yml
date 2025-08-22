@@ -1,15 +1,12 @@
-name: Build GKI Kernel (AnyKernel3 with Modules)
+name: Build Kernel Modules Only
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
-  build:
+  build_modules:
     runs-on: ubuntu-latest
-    name: Build Kernel + Modules
+    name: Build Kernel Modules
 
     steps:
       - name: Checkout Kernel Source
@@ -22,10 +19,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full \
-            android-sdk-libsparse-utils erofs-utils default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
-            libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod \
-            openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
+          sudo apt install -y git build-essential libelf-dev libncurses-dev clang lld python3 python-is-python3
 
       - name: Setup Neutron-Clang Toolchain
         run: |
@@ -43,27 +37,12 @@ jobs:
           echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
           echo "LOCALVERSION=-NeutronClang" >> $GITHUB_ENV
 
-      - name: Configure Kernel (fixed for Clang IPv6 build)
+      - name: Prepare Kernel Build Directory
         run: |
-          rm -rf out build modules_out
-          mkdir -p out build modules_out
+          # Assuming you have out/ from previous kernel build
+          mkdir -p out modules_out
 
-          # Use GKI defconfig
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
-
-          # Disable problematic IPv6 options that break Clang builds
-          scripts/config --file out/.config -d IPV6_MROUTE
-          scripts/config --file out/.config -d IPV6_MROUTE_MULTIPLE_TABLES
-          scripts/config --file out/.config -d NETFILTER_XT_TARGET_ECN
-          scripts/config --file out/.config -d NETFILTER_XT_TARGET_TOS
-
-          # Ensure olddefconfig fixes all dependencies
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
-
-          # Optional: print IPv6 config for sanity check
-          grep CONFIG_IPV6 out/.config || true
-
-      - name: Build Kernel (Image + dtb)
+      - name: Build Modules
         run: |
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=clang \
@@ -76,50 +55,19 @@ jobs:
             READELF=llvm-readelf \
             HOSTCC=clang \
             HOSTCXX=clang++ \
-            HOSTLD=ld.lld Image.gz-dtb dtbs
+            HOSTLD=ld.lld modules
 
-          cp out/arch/arm64/boot/Image.gz-dtb build/ || true
-          cp out/arch/arm64/boot/dtb.img build/ || true
-          cp out/arch/arm64/boot/dts/vendor/*.dtb build/ || true
-
-      - name: Build Kernel Modules
-        run: |
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) modules
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out INSTALL_MOD_PATH=$GITHUB_WORKSPACE/modules_out modules_install
 
-      - name: Clone AnyKernel3 and Package
+      - name: Package Modules for AnyKernel3
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-          rm -rf AnyKernel3/.git
-
-          # Copy kernel image
-          cp build/Image.gz-dtb AnyKernel3/
-
-          # Copy dtb files
-          cp build/dtb.img AnyKernel3/ || true
-          cp build/*.dtb AnyKernel3/ || true
-
-          # Copy built modules (with proper structure)
           mkdir -p AnyKernel3/modules/lib/modules
           cp -r modules_out/lib/modules/* AnyKernel3/modules/lib/modules/
+          cd AnyKernel3 && zip -r9 ../Kernel-Modules.zip *
 
-          cd AnyKernel3 && zip -r9 ../Kernel-Flashable.zip *
-
-      - name: Upload Raw Kernel Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: raw-kernel-build
-          path: build/*
-
-      - name: Upload Modules
+      - name: Upload Modules Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-modules
-          path: modules_out/lib/modules/**
-
-      - name: Upload AnyKernel3 Zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: flashable-zip
-          path: Kernel-Flashable.zip
+          path: Kernel-Modules.zip
           
