@@ -1,93 +1,104 @@
-name: Build GKI Kernel
+name: Build GKI Kernel (AnyKernel3 + Modules)
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Kernel + DTBs
+    name: Build Kernel
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout kernel source
       - name: Checkout Kernel Source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
           ref: main
           submodules: recursive
 
-      # 2️⃣ Install dependencies
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk \
-              gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils \
-              default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
-              libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc \
-              libtinfo6 make repo cpio kmod openssl libelf-dev pahole libssl-dev libarchive-tools zstd
+          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full \
+              android-sdk-libsparse-utils erofs-utils default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
+              libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod \
+              openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
+          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
+          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb || true
 
-      # 3️⃣ Setup Android NDK r27b
-      - name: Setup Android NDK r27b
+      - name: Setup Neutron-Clang Toolchain
         run: |
-          mkdir -p $GITHUB_WORKSPACE/ndk
-          curl -L https://dl.google.com/android/repository/android-ndk-r27b-linux.zip -o ndk-r27b.zip
-          unzip ndk-r27b.zip -d $GITHUB_WORKSPACE/ndk
-          rm ndk-r27b.zip
-          echo "NDK_PATH=$GITHUB_WORKSPACE/ndk/android-ndk-r27b" >> $GITHUB_ENV
-          echo "PATH=$GITHUB_WORKSPACE/ndk/android-ndk-r27b/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH" >> $GITHUB_ENV
+          mkdir -p $HOME/toolchains/neutron-clang
+          cd $HOME/toolchains/neutron-clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          bash antman -S
 
-      # 4️⃣ Set environment variables
       - name: Set Environment Variables
         run: |
-          echo "KERNEL_ROOT=$(pwd)" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_USER=@ravindu644" >> $GITHUB_ENV
-          echo "CC=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> $GITHUB_ENV
-          echo "CXX=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" >> $GITHUB_ENV
+          echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=cmf" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=github" >> $GITHUB_ENV
+          echo "LOCALVERSION=-NeutronClang" >> $GITHUB_ENV
 
-      # 5️⃣ Build kernel
-      - name: Build Kernel
+      - name: Build Kernel (Image.gz-dtb + modules)
         run: |
+          rm -rf out build
           mkdir -p out build
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out mrproper
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out config
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
-              CC=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
-              CXX=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ \
-              AR=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar \
-              NM=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm \
-              STRIP=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
-              OBJCOPY=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy \
-              OBJDUMP=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump \
-              READELF=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf \
-              HOSTCC=gcc \
-              HOSTCXX=g++ \
-              HOSTLD=ld
-          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
+            CC=clang \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            LD=ld.lld \
+            STRIP=llvm-strip \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            READELF=llvm-readelf \
+            HOSTCC=clang \
+            HOSTCXX=clang++ \
+            HOSTLD=ld.lld
 
-      # 6️⃣ Build DTBs
-      - name: Build Device Tree Blobs
+          # Copy kernel image
+          cp out/arch/arm64/boot/Image.gz-dtb build/
+
+          # Build modules
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) modules \
+            CC=clang LD=ld.lld
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) modules_install \
+            INSTALL_MOD_PATH=$GITHUB_WORKSPACE/modules \
+            INSTALL_MOD_STRIP=1
+
+          # Prepare vendor modules dir
+          mkdir -p build/vendor/lib/modules
+          cp -r modules/lib/modules/* build/vendor/lib/modules/
+
+      - name: Prepare AnyKernel3
         run: |
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out dtbs -j$(nproc)
-          mkdir -p $GITHUB_WORKSPACE/build/dtb
-          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/dts/vendor/qcom/*.dtb $GITHUB_WORKSPACE/build/dtb/
+          git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel
+          cp build/Image.gz-dtb AnyKernel/
+          mkdir -p AnyKernel/modules/vendor/lib/modules
+          cp -r build/vendor/lib/modules/* AnyKernel/modules/vendor/lib/modules/
+          sed -i 's/kernelstring=.*/kernelstring="CMF GKI Kernel - NeutronClang"/' AnyKernel/anykernel.sh
+          cd AnyKernel
+          zip -r9 ../Kernel-AnyKernel.zip *
 
-      # 7️⃣ Optional: Combine kernel + dtb
-      - name: Combine Kernel + DTBs (Optional)
-        run: |
-          cat $GITHUB_WORKSPACE/build/Image $GITHUB_WORKSPACE/build/dtb/*.dtb > $GITHUB_WORKSPACE/build/Image.gz-dtb
-
-      # 8️⃣ Upload artifacts
-      - name: Upload Kernel Artifact
+      - name: Upload Raw Kernel
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-build
-          path: |
-            build/Image
-            build/dtb
-            build/Image.gz-dtb
+          name: raw-kernel
+          path: build/Image.gz-dtb
+
+      - name: Upload Vendor Modules
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor-modules
+          path: build/vendor/lib/modules
+
+      - name: Upload Flashable AnyKernel3 Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashable-kernel
+          path: Kernel-AnyKernel.zip
+          
