@@ -43,14 +43,25 @@ jobs:
           echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
           echo "LOCALVERSION=-NeutronClang" >> $GITHUB_ENV
 
-      - name: Configure Kernel
+      - name: Configure Kernel (fixed for Clang IPv6 build)
         run: |
           rm -rf out build modules_out
           mkdir -p out build modules_out
+
+          # Use GKI defconfig
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+
+          # Disable problematic IPv6 options that break Clang builds
           scripts/config --file out/.config -d IPV6_MROUTE
           scripts/config --file out/.config -d IPV6_MROUTE_MULTIPLE_TABLES
+          scripts/config --file out/.config -d NETFILTER_XT_TARGET_ECN
+          scripts/config --file out/.config -d NETFILTER_XT_TARGET_TOS
+
+          # Ensure olddefconfig fixes all dependencies
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+
+          # Optional: print IPv6 config for sanity check
+          grep CONFIG_IPV6 out/.config || true
 
       - name: Build Kernel (Image + dtb)
         run: |
