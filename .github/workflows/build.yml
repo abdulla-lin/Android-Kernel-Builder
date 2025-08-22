@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang)
+name: Build CMF Phone 1 Kernel (Neutron Clang + AnyKernel3)
 
 on:
   workflow_dispatch:
@@ -10,62 +10,62 @@ jobs:
     steps:
     - name: Checkout kernel source
       uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: main
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison flex git make gcc clang lld \
-          libncurses-dev libssl-dev ccache curl zip unzip
+        sudo apt-get install -y git wget curl build-essential bc bison flex \
+          libssl-dev ccache python3 python3-pip zip unzip zstd
 
-    - name: Download Neutron Clang
+    - name: Setup Neutron Clang Toolchain
       run: |
-        git clone https://github.com/Neutron-Toolchains/AntMan clang
-        ./clang/antman -S
+        mkdir -p $HOME/toolchains/neutron-clang
+        cd $HOME/toolchains/neutron-clang
+        curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+        chmod +x antman
+        ./antman -S
 
-    - name: Set environment
+    - name: Build Kernel
       run: |
-        echo "ARCH=arm64" >> $GITHUB_ENV
-        echo "SUBARCH=arm64" >> $GITHUB_ENV
-        echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-        echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
-        echo "PATH=$GITHUB_WORKSPACE/clang/bin:$PATH" >> $GITHUB_ENV
-        echo "KBUILD_BUILD_USER=github" >> $GITHUB_ENV
-        echo "KBUILD_BUILD_HOST=actions" >> $GITHUB_ENV
-        echo "CC=clang" >> $GITHUB_ENV
-        echo "LLVM=1" >> $GITHUB_ENV
-        echo "LLVM_IAS=1" >> $GITHUB_ENV
+        export PATH=$HOME/toolchains/neutron-clang/bin:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export KBUILD_BUILD_USER=github
+        export KBUILD_BUILD_HOST=actions
 
-    - name: Make gki_defconfig
-      run: |
-        make O=out ARCH=arm64 gki_defconfig
+        mkdir -p out
 
-    - name: Build kernel
-      run: |
-        make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang LLVM=1 LLVM_IAS=1
+        # gki_defconfig
+        make O=out gki_defconfig CC=clang
+
+        # Build kernel + modules
+        make -j$(nproc --all) O=out \
+          CC=clang \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+          LLVM=1 LLVM_IAS=1
 
     - name: Prepare AnyKernel3
       run: |
-        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel
-        cp out/arch/arm64/boot/Image.gz AnyKernel/
-        cp out/arch/arm64/boot/Image.gz-dtb AnyKernel/ || true
-        cp out/arch/arm64/boot/dtb.img AnyKernel/ || true
+        git clone https://github.com/osm0sis/AnyKernel3.git
+        cd AnyKernel3
+        rm -rf .git
 
-        # Create module directory
-        mkdir -p AnyKernel/modules/vendor/lib/modules
+        # Copy kernel image
+        cp ../out/arch/arm64/boot/Image.gz-dtb .
 
-        # Copy all modules (.ko files)
-        find out/ -name "*.ko" -exec cp {} AnyKernel/modules/vendor/lib/modules/ \; || true
+        # Create modules dir
+        mkdir -p modules/vendor/lib/modules
 
-        cd AnyKernel
-        zip -r9 ../Kernel.zip * -x .git README.md *.zip
+        # Copy all built modules (.ko files) if any exist
+        find ../out/ -name "*.ko" -exec cp {} modules/vendor/lib/modules/ \; || true
 
-    - name: Upload kernel zip
+        # Zip the AnyKernel3 package
+        zip -r9 ../CMF1-Kernel-AK3.zip *
+
+    - name: Upload flashable zip
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel
-        path: Kernel.zip
+        name: CMF1-Kernel-Flashable
+        path: CMF1-Kernel-AK3.zip
         
