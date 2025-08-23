@@ -23,10 +23,12 @@ jobs:
           zlib1g-dev libelf-dev dwarves \
           wget unzip xz-utils tar zstd \
           gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
     - name: Download Neutron Clang (AntMan)
       run: |
         git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman
         $HOME/antman/antman -S=10032024
+
     - name: Build GKI kernel
       run: |
         export ARCH=arm64
@@ -37,7 +39,6 @@ jobs:
         export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
         make O=out gki_defconfig
         make -j$(nproc) O=out
-
         mkdir -p build
         cp out/arch/arm64/boot/Image.gz build/
 
@@ -53,14 +54,18 @@ jobs:
         unzip -j magisk.apk lib/x86_64/*/magiskboot -d ./tools/ || true
         chmod +x ./tools/magiskboot
 
-    - name: Repack Boot.img with Kernel + DTB
+    - name: Unpack Stock Boot
       run: |
         ./tools/magiskboot unpack stock_boot.img
+        ls -lh
 
-        # Replace kernel
-        cp build/Image.gz kernel
+    - name: Repack Boot.img with Kernel + DTB
+      run: |
+        # Replace with uncompressed Image (safer)
+        gunzip -c build/Image.gz > build/Image
+        cp build/Image kernel
 
-        # Keep stock ramdisk + dtb
+        # Keep stock ramdisk + dtb as-is
         ./tools/magiskboot repack stock_boot.img new-boot.img
         mv new-boot.img repacked_boot.img
 
@@ -69,4 +74,14 @@ jobs:
       with:
         name: repacked-boot
         path: repacked_boot.img
-        
+
+    - name: Upload Unpacked Stock Boot
+      uses: actions/upload-artifact@v4
+      with:
+        name: stock-boot-unpacked
+        path: |
+          kernel
+          ramdisk.cpio
+          dtb
+          *-info.txt
+          
