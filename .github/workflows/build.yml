@@ -1,4 +1,4 @@
-name: Build MTK GKI Kernel Image (GCC 14.2, BTF Disabled)
+name: Build MTK GKI Kernel Image (GCC 14.2, BTF & mcast_snoop Disabled)
 
 on:
   push:
@@ -51,12 +51,20 @@ jobs:
         bash antman -S --skip-deps
         cd $GITHUB_WORKSPACE
 
-    - name: Configure Kernel (Disable BTF)
+    - name: Configure Kernel (Disable BTF & mcast_snoop)
       run: |
         mkdir -p out build
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+
         # Disable BTF to prevent pahole errors
         scripts/config --file out/.config -d CONFIG_DEBUG_INFO_BTF
+
+        # Disable IPv6 multicast snoop / routing modules to avoid build failures
+        scripts/config --file out/.config -d IPV6_MROUTE
+        scripts/config --file out/.config -d IPV6_MROUTE_MULTIPLE_TABLES
+        scripts/config --file out/.config -d CONFIG_IPV6_MROUTE_MULTIPLE_TABLES
+        scripts/config --file out/.config -d CONFIG_NETFILTER
+
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
 
     - name: Build Kernel Image
@@ -83,4 +91,3 @@ jobs:
       with:
         name: kernel-image
         path: build/Image
-        
