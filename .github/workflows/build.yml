@@ -1,90 +1,71 @@
-name: Build MTK GKI Kernel Image (GCC 14.2, Net clean)
+name: Build MTK GKI Kernel (Neutron Clang + ARM GNU)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Build Kernel Image
-
-    env:
-      ARCH: arm64
-      LOCALVERSION: -MTK-GCC14
-      KBUILD_BUILD_USER: github
-      KBUILD_BUILD_HOST: actions
-      KBUILD_IGNORE_BTF: 1
 
     steps:
-    - name: Checkout Kernel Source
-      uses: actions/checkout@v3
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
       with:
-        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: main
-        submodules: recursive
+        fetch-depth: 0
 
-    - name: Install Dependencies
+    - name: Setup build environment
       run: |
-        sudo apt update
-        sudo apt install -y build-essential git bc flex bison libncurses-dev \
-          libelf-dev zlib1g-dev python3 python-is-python3 wget curl p7zip-full \
-          device-tree-compiler libtinfo6 cpio kmod zip
-
-    - name: Setup GCC 14.2 Toolchain
-      run: |
-        mkdir -p $HOME/toolchains/gcc14
-        cd $HOME/toolchains/gcc14
-        curl -LO https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+        sudo apt-get update
+        sudo apt-get install -y wget tar lz4 cpio python3 flex bison bc kmod libssl-dev git zip unzip
+        # ARM GNU toolchain
+        mkdir -p ~/toolchains && cd ~/toolchains
+        wget https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
         tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-        echo "$HOME/toolchains/gcc14/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin" >> $GITHUB_PATH
-        cd $GITHUB_WORKSPACE
+        # Neutron Clang
+        wget https://github.com/Neutron-Clang/neutron-clang/releases/download/Neutron-19/Neutron-19.tar.zst
+        tar --zstd -xf Neutron-19.tar.zst
+        mv Neutron-19 clang
 
-    - name: Configure Kernel (disable BTF + fragile net bits)
+    - name: Configure defconfig
       run: |
-        mkdir -p out build
-        make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+        mkdir -p out
+        make O=out ARCH=arm64 CC=clang CROSS_COMPILE=~/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu- \
+          CROSS_COMPILE_ARM32=~/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/arm-none-eabi- \
+          LLVM=1 LLVM_IAS=1 gki_defconfig
+        # Disable BTF (avoid pahole errors)
+        scripts/config --file out/.config -d CONFIG_DEBUG_INFO_BTF
+        yes "" | make O=out ARCH=arm64 olddefconfig
 
-        # ensure helper is executable
-        chmod +x scripts/config
-
-        # ---- Disable BTF (pahole) ----
-        scripts/config --file out/.config -d DEBUG_INFO_BTF
-
-        # ---- Tame IPv6 multicast / routing ----
-        scripts/config --file out/.config -d IPV6_MROUTE
-        scripts/config --file out/.config -d IPV6_MROUTE_MULTIPLE_TABLES
-        scripts/config --file out/.config -d IPV6_MULTIPLE_TABLES
-
-        # ---- Strip advanced NETFILTER/BPF/XFRM that break CI builds ----
-        scripts/config --file out/.config -d NETFILTER
-        scripts/config --file out/.config -d BPF
-        scripts/config --file out/.config -d BPF_SYSCALL
-        scripts/config --file out/.config -d BPF_JIT
-        scripts/config --file out/.config -d NETFILTER_XT_MATCH_BPF
-        scripts/config --file out/.config -d NET_CLS_BPF
-        scripts/config --file out/.config -d NET_ACT_BPF
-        scripts/config --file out/.config -d XFRM
-        scripts/config --file out/.config -d XFRM_USER
-        scripts/config --file out/.config -d XFRM_ALGO
-        scripts/config --file out/.config -d IP_MULTIPLE_TABLES
-
-        # lock in the changes
-        make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
-
-    - name: Build Kernel Image
+    - name: Build Kernel
       run: |
-        export CROSS_COMPILE=$HOME/toolchains/gcc14/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
-        make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out \
-          Image \
-          KBUILD_IGNORE_BTF=1 \
-          -j$(nproc)
-        cp out/arch/arm64/boot/Image build/
+        make -j$(nproc) O=out \
+          ARCH=arm64 \
+          CC=clang \
+          CROSS_COMPILE=~/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu- \
+          CROSS_COMPILE_ARM32=~/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/arm-none-eabi- \
+          LLVM=1 LLVM_IAS=1
 
-    - name: Upload Kernel Image
+    - name: Collect artifacts
+      run: |
+        mkdir -p out/AnyKernel3
+        cp out/arch/arm64/boot/Image out/
+        gzip -c out/arch/arm64/boot/Image > out/Image.gz
+        cp out/arch/arm64/boot/dts/*.dtb out/ || true
+        cat out/arch/arm64/boot/dts/*.dtb > out/dtb.img || true
+
+        # Prepare AnyKernel3
+        git clone https://github.com/osm0sis/AnyKernel3 out/AnyKernel3
+        cp out/Image.gz out/AnyKernel3/zImage
+        cp out/dtb.img out/AnyKernel3/
+        cd out/AnyKernel3 && zip -r9 ../AnyKernel3-MTK.zip *
+
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-image
-        path: build/Image
-        
+        name: MTK-GKI-Kernel
+        path: |
+          out/Image
+          out/Image.gz
+          out/dtb.img
+          out/AnyKernel3-MTK.zip
+          
