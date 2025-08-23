@@ -1,4 +1,4 @@
-name: Build GKI Kernel (Android14 6.1 Apr 2024)
+name: Build CMF Kernel (Android14-6.1)
 
 on:
   workflow_dispatch:
@@ -6,35 +6,56 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
 
     steps:
-      - name: Install Dependencies
+      - name: Checkout Your Kernel Source
+        uses: actions/checkout@v4
+        with:
+          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+          ref: main  # or specify a tag/branch if needed
+
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git wget build-essential bc bison flex \
-            libssl-dev libncurses5-dev ccache python3 unzip tar
+          sudo apt-get install -y \
+            bc bison flex libssl-dev libncurses5-dev \
+            build-essential ccache wget tar zstd
 
-      - name: Clone Kernel Source
+      - name: Download Google Clang 17.0.2
+        run: |
+          wget "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/android14-release/clang-r487747c?format=TEXT" \
+            -O clang.b64
+          mkdir clang
+          base64 --decode clang.b64 | tar -xzf - -C clang
+          
+      - name: Clone Android GKI Common Tree (for headers/modules)
         run: |
           git clone --depth=1 \
             https://android.googlesource.com/kernel/common \
-            -b android14-6.1-2024-04_r1 kernel
+            -b android14-6.1-2024-04_r1 common-gki
 
-      - name: Download Clang 17.0.2 (Google prebuilts)
+      - name: Build Kernel (Using GKI Defconfig)
+        env:
+          PATH: ${{ github.workspace }}/clang/bin:${{ env.PATH }}
         run: |
-          wget "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/android14-release/clang-r487747c?format=TEXT" -O clang_base64.txt
-          mkdir clang
-          base64 --decode clang_base64.txt | tar -xzf - -C clang
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CC=clang
+          export CROSS_COMPILE=aarch64-linux-gnu-  
+          mkdir -p out
+          
+          # Using the GKI defconfig from your CMF tree
+          make O=out gki_defconfig
+          
+          # Build with LTO and optimizations (matches Android defaults)
+          make O=out -j$(nproc) LLVM=1 CLANG_TRIPLE=aarch64-linux-gnu-
 
-      - name: Build Kernel with Clang
-        run: |
-          cd kernel
-          export PATH="$PWD/../clang/bin:$PATH"
-          make O=out ARCH=arm64 gki_defconfig
-          make O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 -j$(nproc)
-
-      - name: Upload Kernel Image
+      - name: Upload Built Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-image
-          path: kernel/out/arch/arm64/boot/Image*
+          name: cmf-kernel-image
+          path: |
+            out/arch/arm64/boot/Image*
+            out/arch/arm64/boot/dtb
+            out/arch/arm64/boot/Image.gz-dtb
