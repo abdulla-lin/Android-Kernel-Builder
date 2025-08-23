@@ -64,20 +64,16 @@ jobs:
         # Replace kernel
         cp build/Image.gz kernel
 
-        # Preserve stock DTB
-        if [ -f dtb ]; then
-          echo "Preserving stock DTB..."
-        fi
-        if [ -f extra ]; then
-          echo "Preserving extra dtbo..."
-        fi
+        # Preserve stock DTB/ramdisk
+        if [ -f dtb ]; then echo "Keeping stock DTB..."; fi
+        if [ -f extra ]; then echo "Keeping stock extra (dtbo)..."; fi
 
-        # Repack
         ./tools/magiskboot repack stock_boot.img new-boot.img
         mv new-boot.img repacked_boot.img
 
     - name: Upload Repacked Boot
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: repacked-boot
         path: repacked_boot.img
+        
