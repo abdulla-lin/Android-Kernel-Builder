@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + Boot Repack
+name: Build CMF Phone 1 Kernel + Boot Repack (with DTB)
 
 on:
   workflow_dispatch:
@@ -57,10 +57,22 @@ jobs:
         unzip -j magisk.apk lib/x86_64/*/magiskboot -d ./tools/ || true
         chmod +x ./tools/magiskboot
 
-    - name: Repack Boot.img with New Kernel
+    - name: Repack Boot.img with Kernel + DTB
       run: |
         ./tools/magiskboot unpack stock_boot.img
+
+        # Replace kernel
         cp build/Image.gz kernel
+
+        # Preserve stock DTB
+        if [ -f dtb ]; then
+          echo "Preserving stock DTB..."
+        fi
+        if [ -f extra ]; then
+          echo "Preserving extra dtbo..."
+        fi
+
+        # Repack
         ./tools/magiskboot repack stock_boot.img new-boot.img
         mv new-boot.img repacked_boot.img
 
@@ -69,4 +81,3 @@ jobs:
       with:
         name: repacked-boot
         path: repacked_boot.img
-        
