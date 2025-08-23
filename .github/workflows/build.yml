@@ -1,12 +1,15 @@
-name: Build Kernel Modules Only
+name: Build GKI Kernel (AnyKernel3)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
-  build_modules:
+  build:
     runs-on: ubuntu-latest
-    name: Build Kernel Modules
+    name: Build Kernel
 
     steps:
       - name: Checkout Kernel Source
@@ -19,8 +22,10 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git build-essential libelf-dev libncurses-dev clang lld python3 python-is-python3
-
+          sudo apt install -y git device-tree-compiler lz4 xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full \
+              android-sdk-libsparse-utils erofs-utils default-jdk gnupg flex bison gperf build-essential zip curl libc6-dev libncurses-dev \
+              libx11-dev libreadline-dev libgl1 libgl1-mesa-dev python3-markdown libxml2-utils xsltproc libtinfo6 make repo cpio kmod \
+              openssl libelf-dev pahole libssl-dev libarchive-tools zstd --fix-missing
       - name: Setup Neutron-Clang Toolchain
         run: |
           mkdir -p $HOME/toolchains/neutron-clang
@@ -28,7 +33,6 @@ jobs:
           curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
           chmod +x antman
           bash antman -S
-
       - name: Set Environment Variables
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
@@ -36,13 +40,16 @@ jobs:
           echo "KBUILD_BUILD_HOST=actions" >> $GITHUB_ENV
           echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
           echo "LOCALVERSION=-NeutronClang" >> $GITHUB_ENV
-
-      - name: Prepare Kernel Build Directory
+      - name: Configure Kernel
         run: |
-          # Assuming you have out/ from previous kernel build
-          mkdir -p out modules_out
-
-      - name: Build Modules
+          rm -rf out build
+          mkdir -p out build
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out defconfig
+          # Disable IPv6 multicast routing to skip mcast_snoop.o build error
+          scripts/config --file out/.config -d IPV6_MROUTE
+          scripts/config --file out/.config -d IPV6_MROUTE_MULTIPLE_TABLES
+          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
+      - name: Build Kernel (Image + dtb)
         run: |
           make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) \
             CC=clang \
@@ -55,19 +62,23 @@ jobs:
             READELF=llvm-readelf \
             HOSTCC=clang \
             HOSTCXX=clang++ \
-            HOSTLD=ld.lld modules
-
-          make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out INSTALL_MOD_PATH=$GITHUB_WORKSPACE/modules_out modules_install
-
-      - name: Package Modules for AnyKernel3
+            HOSTLD=ld.lld
+          cp out/arch/arm64/boot/Image build/
+          cp out/arch/arm64/boot/dts/vendor/*.dtb build/ || true
+      - name: Clone AnyKernel3
         run: |
-          mkdir -p AnyKernel3/modules/lib/modules
-          cp -r modules_out/lib/modules/* AnyKernel3/modules/lib/modules/
-          cd AnyKernel3 && zip -r9 ../Kernel-Modules.zip *
-
-      - name: Upload Modules Artifact
+          git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          cp build/Image AnyKernel3/
+          cp build/*.dtb AnyKernel3/ || true
+          cd AnyKernel3 && zip -r9 ../Kernel-Flashable.zip *
+      - name: Upload Raw Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-modules
-          path: Kernel-Modules.zip
-          
+          name: raw-kernel-build
+          path: build/*
+
+      - name: Upload AnyKernel3 Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashable-zip
+          path: Kernel-Flashable.zip
