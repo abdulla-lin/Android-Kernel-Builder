@@ -8,50 +8,54 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Kernel Source
-        uses: actions/checkout@v4
-        with:
-          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-          ref: main
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+        ref: main
 
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential bc bison flex libssl-dev \
-            libncurses-dev ccache git wget curl unzip zip \
-            python3 patchelf dwarves
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          bc bison build-essential cpio curl flex gcc g++ \
+          git libssl-dev libncurses5-dev \
+          zlib1g-dev libelf-dev dwarves \
+          wget unzip xz-utils tar zstd
 
-      - name: Setup Neutron Clang (via Antman)
-        run: |
-          git clone https://github.com/Neutron-Toolchains/antman.git ~/antman
-          bash ~/antman/antman -S
-          bash ~/antman/antman --patch=glibc
-          echo "PATH=$HOME/neutron-clang/bin:$PATH" >> $GITHUB_ENV
+    - name: Setup Neutron Clang
+      run: |
+        git clone --depth=1 https://github.com/Neutron-Toolchains/antman ~/antman
+        cd ~/antman
+        # fetch clang (ignore errors from libs/patchelf step)
+        ./antman --clang 10032024 || true
+        echo "PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
 
-      - name: Setup ARM GNU Toolchain (for MTK)
-        run: |
-          wget https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-          tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz -C $HOME
-          echo "PATH=$HOME/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH" >> $GITHUB_ENV
+    - name: Setup ARM GNU Toolchain
+      run: |
+        wget https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+        tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz -C ~/
+        echo "PATH=$HOME/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH" >> $GITHUB_ENV
 
-      - name: Build Kernel
-        run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-none-linux-gnu-
-          export PATH=$HOME/neutron-clang/bin:$HOME/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH
+    - name: Build kernel
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CC=clang
+        export CROSS_COMPILE=aarch64-none-linux-gnu-
+        export CROSS_COMPILE_COMPAT=arm-none-linux-gnueabi-
+        export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
+        export PATH=$HOME/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH
 
-          make O=out ARCH=arm64 gki_defconfig
-          make -j$(nproc) O=out ARCH=arm64
+        make O=out gki_defconfig
+        make -j$(nproc) O=out
 
-      - name: Upload Kernel Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-build
-          path: |
-            out/arch/arm64/boot/Image
-            out/arch/arm64/boot/Image.gz
-            out/arch/arm64/boot/dts/**/*.dtb
-            
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build
+        path: |
+          out/arch/arm64/boot/Image
+          out/arch/arm64/boot/Image.gz
+          out/arch/arm64/boot/dts/**/*.dtb
+          
