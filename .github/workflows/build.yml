@@ -1,4 +1,4 @@
-name: Build MTK GKI Kernel Image
+name: Build MTK GKI Kernel Image (GCC 14.2)
 
 on:
   push:
@@ -13,10 +13,9 @@ jobs:
 
     env:
       ARCH: arm64
-      LOCALVERSION: -NeutronClang
+      LOCALVERSION: -MTK-GCC14
       KBUILD_BUILD_USER: github
       KBUILD_BUILD_HOST: actions
-      CROSS_COMPILE: /usr/bin/aarch64-linux-gnu-
       KBUILD_IGNORE_BTF: 1
 
     steps:
@@ -34,7 +33,16 @@ jobs:
           libelf-dev zlib1g-dev python3 python-is-python3 wget curl p7zip-full \
           device-tree-compiler libtinfo6 cpio kmod zip
 
-    - name: Setup Neutron-Clang Toolchain
+    - name: Setup GCC 14.2 Toolchain
+      run: |
+        mkdir -p $HOME/toolchains/gcc14
+        cd $HOME/toolchains/gcc14
+        curl -LO https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+        tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+        echo "$HOME/toolchains/gcc14/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin" >> $GITHUB_PATH
+        cd $GITHUB_WORKSPACE
+
+    - name: Setup Neutron-Clang Toolchain (Optional)
       run: |
         mkdir -p $HOME/toolchains/neutron-clang
         cd $HOME/toolchains/neutron-clang
@@ -44,12 +52,6 @@ jobs:
         bash antman --patch=glibc
         cd $GITHUB_WORKSPACE
 
-    - name: Set Toolchain Paths
-      run: |
-        echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
-        echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=$HOME/toolchains/neutron-clang/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-
     - name: Configure Kernel
       run: |
         mkdir -p out build
@@ -58,6 +60,7 @@ jobs:
 
     - name: Build Kernel Image
       run: |
+        export CROSS_COMPILE=$HOME/toolchains/gcc14/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out \
           Image \
           CC=$HOME/toolchains/neutron-clang/bin/clang \
