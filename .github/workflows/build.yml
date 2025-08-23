@@ -46,11 +46,12 @@ jobs:
       run: |
         curl -L -o stock_boot.img "https://drive.google.com/uc?export=download&id=16H-rtnuTiKmInvHay2pL_7Sa9C2ISYHJ"
 
-    - name: Download MagiskBoot
+    - name: Extract MagiskBoot
       run: |
         mkdir -p tools
-        curl -L -o tools/magiskboot https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot
-        chmod +x tools/magiskboot
+        curl -L -o magisk.apk https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+        unzip -j magisk.apk lib/arm64-v8a/*/magiskboot -d ./tools/ || true
+        chmod +x ./tools/magiskboot
 
     - name: Unpack Stock Boot
       run: |
@@ -59,8 +60,9 @@ jobs:
 
     - name: Repack Boot.img with Kernel + DTB
       run: |
-        # Replace kernel with gzipped Image (MTK requirement)
-        cp build/Image.gz kernel
+        # Replace with uncompressed Image (safer)
+        gunzip -c build/Image.gz > build/Image
+        cp build/Image kernel
 
         # Keep stock ramdisk + dtb as-is
         ./tools/magiskboot repack stock_boot.img new-boot.img
