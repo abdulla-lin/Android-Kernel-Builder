@@ -1,4 +1,4 @@
-name: Build MTK GKI Kernel Image (GCC 14.2)
+name: Build MTK GKI Kernel Image (GCC 14.2, BTF Disabled)
 
 on:
   push:
@@ -42,10 +42,21 @@ jobs:
         echo "$HOME/toolchains/gcc14/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin" >> $GITHUB_PATH
         cd $GITHUB_WORKSPACE
 
-    - name: Configure Kernel
+    - name: (Optional) Setup Neutron-Clang Toolchain
+      run: |
+        mkdir -p $HOME/toolchains/neutron-clang
+        cd $HOME/toolchains/neutron-clang
+        curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+        chmod +x antman
+        bash antman -S --skip-deps
+        cd $GITHUB_WORKSPACE
+
+    - name: Configure Kernel (Disable BTF)
       run: |
         mkdir -p out build
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
+        # Disable BTF to prevent pahole errors
+        scripts/config --file out/.config -d CONFIG_DEBUG_INFO_BTF
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
 
     - name: Build Kernel Image
@@ -53,8 +64,18 @@ jobs:
         export CROSS_COMPILE=$HOME/toolchains/gcc14/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out \
           Image \
-          -j$(nproc) \
-          KBUILD_IGNORE_BTF=1
+          CC=$HOME/toolchains/neutron-clang/bin/clang \
+          AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
+          NM=$HOME/toolchains/neutron-clang/bin/llvm-nm \
+          LD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+          STRIP=$HOME/toolchains/neutron-clang/bin/llvm-strip \
+          OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
+          OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
+          READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
+          HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
+          HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
+          KBUILD_IGNORE_BTF=1 \
+          -j$(nproc)
         cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
     - name: Upload Kernel Image
