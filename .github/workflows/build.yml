@@ -61,9 +61,8 @@ jobs:
 
     - name: Repack Boot.img with Kernel + DTB
       run: |
-        # Replace with uncompressed Image (safer)
-        gunzip -c build/Image.gz > build/Image
-        cp build/Image kernel
+        # Replace kernel with gzipped Image (MTK requirement)
+        cp build/Image.gz kernel
 
         # Keep stock ramdisk + dtb as-is
         ./tools/magiskboot repack stock_boot.img new-boot.img
