@@ -1,57 +1,42 @@
-name: Build GKI Kernel (android14-6.1.68)
+name: Build Android 14 GKI Kernel 6.1.68
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Clone Google GKI 6.1.68 Kernel Source
-        run: |
-          git clone --depth=1 \
-            https://android.googlesource.com/kernel/common \
-            -b android14-6.1.68_r00 kernel
-          echo "KERNEL_DIR=$(pwd)/kernel" >> $GITHUB_ENV
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Setup Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libncurses5-dev libssl-dev zip curl
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git wget build-essential bc bison flex libssl-dev \
+          libncurses5-dev ccache python3 python3-pip
 
-      - name: Setup ARM64 Toolchain
-        run: |
-          mkdir -p $HOME/toolchains
-          cd $HOME/toolchains
-          curl -LO https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-          tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-          echo "PATH=$HOME/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH" >> $GITHUB_ENV
+    - name: Clone Kernel Source (6.1.68 - android14-2024-04)
+      run: |
+        git clone https://android.googlesource.com/kernel/common -b android14-6.1-2024-04 kernel
 
-      - name: Optional Modify Kernel (Insert Patches)
-        run: |
-          cd $KERNEL_DIR
-          # Example: sed -i 's/# CONFIG_DEBUG_INFO is not set/CONFIG_DEBUG_INFO=y/' arch/arm64/configs/gki_defconfig
-          # Add other sed or patch commands as needed
+    - name: Download Google Clang 17.0.2 (clang-r487747c)
+      run: |
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz -O clang.tar.gz
+        mkdir clang
+        tar -xf clang.tar.gz -C clang
 
-      - name: Build Kernel
-        run: |
-          cd $KERNEL_DIR
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-none-linux-gnu-
-          mkdir -p out
-          make O=out gki_defconfig
-          make -j$(nproc) O=out
+    - name: Build Kernel
+      run: |
+        cd kernel
+        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+        make O=out ARCH=arm64 gki_defconfig
+        make O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 -j$(nproc)
 
-      - name: Package with AnyKernel3
-        run: |
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
-          cp $KERNEL_DIR/out/arch/arm64/boot/Image AnyKernel3/
-          cd AnyKernel3
-          zip -r9 ../gki-kernel-6.1.68.zip ./*
-
-      - name: Upload Kernel Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: gki-kernel-6.1.68
-          path: gki-kernel-6.1.68.zip
+    - name: Upload Kernel Image
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-image
+        path: |
+          kernel/out/arch/arm64/boot/Image*
