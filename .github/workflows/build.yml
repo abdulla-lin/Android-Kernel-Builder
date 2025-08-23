@@ -1,4 +1,4 @@
-name: Build Android 14 GKI Kernel 6.1.68
+name: Build Android14 GKI Kernel 6.1.68 (April 2024)
 
 on:
   workflow_dispatch:
@@ -8,35 +8,32 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git wget build-essential bc bison flex libssl-dev \
+            libncurses5-dev ccache python3 unzip --no-install-recommends
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y git wget build-essential bc bison flex libssl-dev \
-          libncurses5-dev ccache python3 python3-pip
+      - name: Clone Android 14 GKI Linux 6.1.68 (Apr 2024)
+        run: |
+          git clone --depth=1 \
+            https://android.googlesource.com/kernel/common \
+            -b android14-6.1-2024-04_r16 kernel
 
-    - name: Clone Kernel Source (6.1.68 - android14-2024-04)
-      run: |
-        git clone https://android.googlesource.com/kernel/common -b android14-6.1-2024-04 kernel
+      - name: Download Google Clang 17.0.2 (clang-r487747c)
+        run: |
+          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz -O clang.tar.gz
+          mkdir clang && tar -xf clang.tar.gz -C clang
 
-    - name: Download Google Clang 17.0.2 (clang-r487747c)
-      run: |
-        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz -O clang.tar.gz
-        mkdir clang
-        tar -xf clang.tar.gz -C clang
+      - name: Build Kernel with Google Clang
+        run: |
+          cd kernel
+          export PATH=$PWD/../clang/bin:$PATH
+          make O=out ARCH=arm64 gki_defconfig
+          make O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 -j$(nproc)
 
-    - name: Build Kernel
-      run: |
-        cd kernel
-        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-        make O=out ARCH=arm64 gki_defconfig
-        make O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 -j$(nproc)
-
-    - name: Upload Kernel Image
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel-image
-        path: |
-          kernel/out/arch/arm64/boot/Image*
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image-6.1.68-abuild
+          path: kernel/out/arch/arm64/boot/Image*
