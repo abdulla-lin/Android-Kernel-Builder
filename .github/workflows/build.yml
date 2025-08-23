@@ -1,61 +1,154 @@
-name: Build CMF Kernel (Android14-6.1)
+name: Build CMF Phone 1 Kernel (Neutron Clang → Wildlife-style packaging)
 
 on:
   workflow_dispatch:
 
+env:
+  # adjust as needed (kept empty to use the antman-provided toolchain path)
+  NEUTRON_BIN: ${{ env.HOME }}/toolchains/neutron-clang/bin
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
 
     steps:
-      - name: Checkout Your Kernel Source
+      - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
           repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-          ref: main  # or specify a tag/branch if needed
+          ref: main
+          fetch-depth: 0
 
-      - name: Install Build Dependencies
+      - name: Install minimal build deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            bc bison flex libssl-dev libncurses5-dev \
-            build-essential ccache wget tar zstd
+          sudo apt-get update -y
+          sudo apt-get install -y bc bison build-essential cpio curl flex gcc g++ \
+            git libssl-dev libncurses5-dev zlib1g-dev libelf-dev dwarves \
+            wget unzip xz-utils tar zstd python3 python3-pip rsync
 
-      - name: Download Google Clang 17.0.2
+      - name: Download Neutron Clang (AntMan) - unchanged toolchain
         run: |
-          wget "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/android14-release/clang-r487747c?format=TEXT" \
-            -O clang.b64
-          mkdir clang
-          base64 --decode clang.b64 | tar -xzf - -C clang
-          
-      - name: Clone Android GKI Common Tree (for headers/modules)
-        run: |
-          git clone --depth=1 \
-            https://android.googlesource.com/kernel/common \
-            -b android14-6.1-2024-04_r1 common-gki
+          mkdir -p $HOME/antman
+          git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman || true
+          # call antman to install neutron clang; keep exactly the default layout antman uses
+          bash $HOME/antman/antman -S || true
+          # toolchain binaries will be at $HOME/toolchains/neutron-clang/bin (AntMan default)
+          echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
+          echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_PATH
 
-      - name: Build Kernel (Using GKI Defconfig)
-        env:
-          PATH: ${{ github.workspace }}/clang/bin:${{ env.PATH }}
+      - name: Show toolchain versions (sanity check)
         run: |
+          $HOME/toolchains/neutron-clang/bin/clang --version || true
+          $HOME/toolchains/neutron-clang/bin/ld.lld --version || true
+          ls -la $HOME/toolchains/neutron-clang/bin
+
+      - name: Ensure gki_defconfig exists & print configs
+        run: |
+          if [ -f arch/arm64/configs/gki_defconfig ]; then
+            echo "Found gki_defconfig in repo"
+          else
+            echo "ERROR: gki_defconfig not found in repo root arch/arm64/configs" >&2
+            ls -R arch/arm64/configs | sed -n '1,200p'
+            exit 1
+          fi
+          # quick sanity: list defconfigs
+          ls -1 arch/arm64/configs | head -n 50
+
+      - name: Build kernel using Neutron clang (no toolchain change)
+        run: |
+          set -euo pipefail
+          # use the Neutron clang from AntMan exactly — do not alter toolchain choice
+          export PATH=$HOME/toolchains/neutron-clang/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
           export CC=clang
-          export CROSS_COMPILE=aarch64-linux-gnu-  
-          mkdir -p out
-          
-          # Using the GKI defconfig from your CMF tree
-          make O=out gki_defconfig
-          
-          # Build with LTO and optimizations (matches Android defaults)
-          make O=out -j$(nproc) LLVM=1 CLANG_TRIPLE=aarch64-linux-gnu-
+          # CLANG_TRIPLE not required for clang wrapper; keep CROSS_COMPILE for external tools
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          export LD=ld.lld
 
-      - name: Upload Built Kernel Artifact
+          mkdir -p out
+          # Use gki_defconfig (you said gki_defconfig is the config name)
+          echo "Running 'make O=out gki_defconfig'..."
+          make O=out gki_defconfig
+
+          # Build with clang and LLVM backend. Keep LTO as-is (neutron clang may enable/disable).
+          # We don't force toolchain changes; but set LLVM=1 to use clang/llvm linker properly.
+          echo "Starting kernel build..."
+          make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1
+
+          echo "Build finished. Listing boot outputs..."
+          ls -l out/arch/arm64/boot || true
+
+      - name: Prepare AnyKernel3 flashable zip (Wildlife style: only kernel image)
+        run: |
+          set -euo pipefail
+          # Ensure AnyKernel3 folder ready
+          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3 || \
+            git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          rm -rf AnyKernel3/.git || true
+
+          # Prefer Image.gz-dtb if produced, else Image.gz or Image
+          OUTDIR=out/arch/arm64/boot
+          KOUT=""
+          if [ -f "$OUTDIR/Image.gz-dtb" ]; then
+            KOUT="$OUTDIR/Image.gz-dtb"
+          elif [ -f "$OUTDIR/Image.gz" ]; then
+            KOUT="$OUTDIR/Image.gz"
+          elif [ -f "$OUTDIR/Image" ]; then
+            KOUT="$OUTDIR/Image"
+          else
+            echo "ERROR: No kernel image found in $OUTDIR" >&2
+            ls -la $OUTDIR || true
+            exit 1
+          fi
+
+          echo "Using kernel image: $KOUT"
+          cp "$KOUT" AnyKernel3/Image
+          # preserve kernel name in AnyKernel as Wildlife does (no dtb, no ramdisk)
+          cd AnyKernel3
+          zip -r9 ../cmf1-anykernel.zip ./*
+          cd ..
+
+      - name: Optional: Repack boot.img using stock boot ramdisk (if stock_images provided)
+        if: ${{ always() }}
+        run: |
+          # This step is optional and only executes repack if you put stock images in stock_images/
+          set -euo pipefail
+          STOCK_DIR=stock_images
+          mkdir -p output
+          if [ -f "${STOCK_DIR}/boot.img" ]; then
+            echo "[*] stock_images/boot.img detected — attempting to unpack and replace kernel"
+            # require mkbootimg/unpack tools (mkbootimg.py and avbtool are available earlier in your other workflow; here we use simple magiskboot if present)
+            # Try magiskboot if available, else skip
+            if command -v magiskboot >/dev/null 2>&1; then
+              magiskboot --unpack ${STOCK_DIR}/boot.img
+              # Replace kernel (Image.gz-dtb preferred)
+              KERNEL_REPL=../AnyKernel3/Image
+              if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+                cp out/arch/arm64/boot/Image.gz-dtb new-kernel
+              elif [ -f out/arch/arm64/boot/Image.gz ]; then
+                cp out/arch/arm64/boot/Image.gz new-kernel
+              elif [ -f out/arch/arm64/boot/Image ]; then
+                cp out/arch/arm64/boot/Image new-kernel
+              fi
+              mv new-kernel ramdisk/kernel || true
+              magiskboot --repack boot.img || true
+              mv boot.img ../output/boot-repacked.img || true
+            else
+              echo "magiskboot not available on runner; skipping repack step. If you want repack, include magiskboot or provide mkbootimg and scripts."
+            fi
+          else
+            echo "No stock_images/boot.img found — skipping repack step."
+          fi
+
+      - name: Upload artifacts (AnyKernel + raw kernel)
         uses: actions/upload-artifact@v4
         with:
-          name: cmf-kernel-image
+          name: cmf1-kernel-artifacts
           path: |
+            cmf1-anykernel.zip
             out/arch/arm64/boot/Image*
-            out/arch/arm64/boot/dtb
-            out/arch/arm64/boot/Image.gz-dtb
+            out/arch/arm64/boot/dtb || true
+            output/* || true
