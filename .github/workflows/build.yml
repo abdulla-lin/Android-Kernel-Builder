@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang)
+name: Build GKI Kernel (android14-6.1.68)
 
 on:
   workflow_dispatch:
@@ -8,80 +8,50 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout kernel source
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: main
+      - name: Clone Google GKI 6.1.68 Kernel Source
+        run: |
+          git clone --depth=1 \
+            https://android.googlesource.com/kernel/common \
+            -b android14-6.1.68_r00 kernel
+          echo "KERNEL_DIR=$(pwd)/kernel" >> $GITHUB_ENV
 
-    - name: Install dependencies (including libraries for MagiskBoot)
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          bc bison build-essential cpio curl flex gcc g++ \
-          git libssl-dev libncurses5-dev libncurses5 libncursesw5 libtinfo5 zlib1g \
-          wget unzip xz-utils tar zstd \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+      - name: Setup Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc build-essential flex bison libncurses5-dev libssl-dev zip curl
 
-    - name: Download Neutron Clang (AntMan)
-      run: |
-        git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman
-        $HOME/antman/antman -S=10032024
+      - name: Setup ARM64 Toolchain
+        run: |
+          mkdir -p $HOME/toolchains
+          cd $HOME/toolchains
+          curl -LO https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+          tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+          echo "PATH=$HOME/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Build GKI kernel
-      run: |
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CC=clang
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-        export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
-        make O=out gki_defconfig
-        make -j$(nproc) O=out
-        mkdir -p build
-        cp out/arch/arm64/boot/Image.gz build/
+      - name: Optional Modify Kernel (Insert Patches)
+        run: |
+          cd $KERNEL_DIR
+          # Example: sed -i 's/# CONFIG_DEBUG_INFO is not set/CONFIG_DEBUG_INFO=y/' arch/arm64/configs/gki_defconfig
+          # Add other sed or patch commands as needed
 
-    - name: Download Stock Boot.img
-      run: |
-        curl -L -o stock_boot.img "https://drive.google.com/uc?export=download&id=16H-rtnuTiKmInvHay2pL_7Sa9C2ISYHJ"
+      - name: Build Kernel
+        run: |
+          cd $KERNEL_DIR
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-none-linux-gnu-
+          mkdir -p out
+          make O=out gki_defconfig
+          make -j$(nproc) O=out
 
-    - name: Download MagiskBoot Linux x86_64
-      run: |
-        mkdir -p tools
-        curl -L -o tools/magiskboot https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot
-        chmod +x tools/magiskboot
+      - name: Package with AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
+          cp $KERNEL_DIR/out/arch/arm64/boot/Image AnyKernel3/
+          cd AnyKernel3
+          zip -r9 ../gki-kernel-6.1.68.zip ./*
 
-    - name: Test MagiskBoot
-      run: |
-        ./tools/magiskboot -h
-
-    - name: Unpack Stock Boot
-      run: |
-        ./tools/magiskboot unpack stock_boot.img
-        ls -lh
-
-    - name: Repack Boot.img with Kernel + DTB
-      run: |
-        # Replace kernel with gzipped Image (MTK requirement)
-        cp build/Image.gz kernel
-
-        # Keep stock ramdisk + dtb as-is
-        ./tools/magiskboot repack stock_boot.img new-boot.img
-        mv new-boot.img repacked_boot.img
-
-    - name: Upload Repacked Boot
-      uses: actions/upload-artifact@v4
-      with:
-        name: repacked-boot
-        path: repacked_boot.img
-
-    - name: Upload Unpacked Stock Boot
-      uses: actions/upload-artifact@v4
-      with:
-        name: stock-boot-unpacked
-        path: |
-          kernel
-          ramdisk.cpio
-          dtb
-          *-info.txt
-          
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: gki-kernel-6.1.68
+          path: gki-kernel-6.1.68.zip
