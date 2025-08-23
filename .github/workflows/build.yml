@@ -28,7 +28,8 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y build-essential clang lld llvm git bc flex bison libncurses-dev libssl-dev python3 zip
+        sudo apt install -y build-essential clang lld llvm libelf-dev zlib1g-dev libncurses-dev \
+          python3 git bc flex bison zip
 
     - name: Setup Neutron-Clang Toolchain
       run: |
@@ -49,9 +50,9 @@ jobs:
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
 
-    - name: Build Kernel Image
+    - name: Build Kernel Image (skip BPF)
       run: |
-        make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out -j$(nproc) Image
+        make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out Image KBUILD_IGNORE_BTF=1 -j$(nproc)
         cp out/arch/arm64/boot/Image build/
 
     - name: Upload Kernel Image
