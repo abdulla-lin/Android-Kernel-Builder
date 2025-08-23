@@ -1,4 +1,4 @@
-name: Build MTK Kernel (Neutron Clang + ARM GNU)
+name: Build CMF Phone 1 Kernel (Neutron Clang)
 
 on:
   workflow_dispatch:
@@ -21,41 +21,33 @@ jobs:
           bc bison build-essential cpio curl flex gcc g++ \
           git libssl-dev libncurses5-dev \
           zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar zstd
+          wget unzip xz-utils tar zstd \
+          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-    - name: Setup Neutron Clang
+    - name: Download Neutron Clang (AntMan)
       run: |
-        git clone --depth=1 https://github.com/Neutron-Toolchains/antman ~/antman
-        cd ~/antman
-        # fetch clang (ignore errors from libs/patchelf step)
-        ./antman --clang 10032024 || true
-        echo "PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
+        git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman
+        $HOME/antman/antman -S=10032024
 
-    - name: Setup ARM GNU Toolchain
-      run: |
-        wget https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-        tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz -C ~/
-        echo "PATH=$HOME/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH" >> $GITHUB_ENV
-
-    - name: Build kernel
+    - name: Build GKI kernel
       run: |
         export ARCH=arm64
         export SUBARCH=arm64
         export CC=clang
-        export CROSS_COMPILE=aarch64-none-linux-gnu-
-        export CROSS_COMPILE_COMPAT=arm-none-linux-gnueabi-
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
-        export PATH=$HOME/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH
 
         make O=out gki_defconfig
         make -j$(nproc) O=out
 
-    - name: Upload artifacts
+    - name: Upload kernel artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-build
+        name: cmf1-kernel
         path: |
           out/arch/arm64/boot/Image
           out/arch/arm64/boot/Image.gz
+          out/arch/arm64/boot/Image.gz-dtb
           out/arch/arm64/boot/dts/**/*.dtb
           
