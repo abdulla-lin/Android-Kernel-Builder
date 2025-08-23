@@ -1,9 +1,8 @@
-name: Build MTK GKI Kernel Image (GCC 14.2, BTF & mcast_snoop Disabled)
+name: Build MTK GKI Kernel Image (GCC 14.2, Net clean)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -42,29 +41,36 @@ jobs:
         echo "$HOME/toolchains/gcc14/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin" >> $GITHUB_PATH
         cd $GITHUB_WORKSPACE
 
-    - name: (Optional) Setup Neutron-Clang Toolchain
-      run: |
-        mkdir -p $HOME/toolchains/neutron-clang
-        cd $HOME/toolchains/neutron-clang
-        curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
-        chmod +x antman
-        bash antman -S --skip-deps
-        cd $GITHUB_WORKSPACE
-
-    - name: Configure Kernel (Disable BTF & mcast_snoop)
+    - name: Configure Kernel (disable BTF + fragile net bits)
       run: |
         mkdir -p out build
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
 
-        # Disable BTF to prevent pahole errors
-        scripts/config --file out/.config -d CONFIG_DEBUG_INFO_BTF
+        # ensure helper is executable
+        chmod +x scripts/config
 
-        # Disable IPv6 multicast snoop / routing modules to avoid build failures
+        # ---- Disable BTF (pahole) ----
+        scripts/config --file out/.config -d DEBUG_INFO_BTF
+
+        # ---- Tame IPv6 multicast / routing ----
         scripts/config --file out/.config -d IPV6_MROUTE
         scripts/config --file out/.config -d IPV6_MROUTE_MULTIPLE_TABLES
-        scripts/config --file out/.config -d CONFIG_IPV6_MROUTE_MULTIPLE_TABLES
-        scripts/config --file out/.config -d CONFIG_NETFILTER
+        scripts/config --file out/.config -d IPV6_MULTIPLE_TABLES
 
+        # ---- Strip advanced NETFILTER/BPF/XFRM that break CI builds ----
+        scripts/config --file out/.config -d NETFILTER
+        scripts/config --file out/.config -d BPF
+        scripts/config --file out/.config -d BPF_SYSCALL
+        scripts/config --file out/.config -d BPF_JIT
+        scripts/config --file out/.config -d NETFILTER_XT_MATCH_BPF
+        scripts/config --file out/.config -d NET_CLS_BPF
+        scripts/config --file out/.config -d NET_ACT_BPF
+        scripts/config --file out/.config -d XFRM
+        scripts/config --file out/.config -d XFRM_USER
+        scripts/config --file out/.config -d XFRM_ALGO
+        scripts/config --file out/.config -d IP_MULTIPLE_TABLES
+
+        # lock in the changes
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
 
     - name: Build Kernel Image
@@ -72,22 +78,13 @@ jobs:
         export CROSS_COMPILE=$HOME/toolchains/gcc14/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out \
           Image \
-          CC=$HOME/toolchains/neutron-clang/bin/clang \
-          AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
-          NM=$HOME/toolchains/neutron-clang/bin/llvm-nm \
-          LD=$HOME/toolchains/neutron-clang/bin/ld.lld \
-          STRIP=$HOME/toolchains/neutron-clang/bin/llvm-strip \
-          OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
-          OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
-          READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
-          HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
-          HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
           KBUILD_IGNORE_BTF=1 \
           -j$(nproc)
-        cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
+        cp out/arch/arm64/boot/Image build/
 
     - name: Upload Kernel Image
       uses: actions/upload-artifact@v4
       with:
         name: kernel-image
         path: build/Image
+        
