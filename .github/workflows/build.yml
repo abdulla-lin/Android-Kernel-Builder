@@ -1,4 +1,4 @@
-name: Build MTK GKI Kernel (Neutron Clang + ARM GNU)
+name: Build MTK Kernel (Neutron Clang + ARM GNU)
 
 on:
   workflow_dispatch:
@@ -8,64 +8,50 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout kernel source
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+          ref: main
 
-    - name: Setup build environment
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y wget tar lz4 cpio python3 flex bison bc kmod libssl-dev git zip unzip
-        # ARM GNU toolchain
-        mkdir -p ~/toolchains && cd ~/toolchains
-        wget https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-        tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-        # Neutron Clang
-        wget https://github.com/Neutron-Clang/neutron-clang/releases/download/Neutron-19/Neutron-19.tar.zst
-        tar --zstd -xf Neutron-19.tar.zst
-        mv Neutron-19 clang
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bc bison flex libssl-dev \
+            libncurses-dev ccache git wget curl unzip zip \
+            python3 patchelf dwarves
 
-    - name: Configure defconfig
-      run: |
-        mkdir -p out
-        make O=out ARCH=arm64 CC=clang CROSS_COMPILE=~/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu- \
-          CROSS_COMPILE_ARM32=~/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/arm-none-eabi- \
-          LLVM=1 LLVM_IAS=1 gki_defconfig
-        # Disable BTF (avoid pahole errors)
-        scripts/config --file out/.config -d CONFIG_DEBUG_INFO_BTF
-        yes "" | make O=out ARCH=arm64 olddefconfig
+      - name: Setup Neutron Clang (via Antman)
+        run: |
+          git clone https://github.com/Neutron-Toolchains/antman.git ~/antman
+          bash ~/antman/antman -S
+          bash ~/antman/antman --patch=glibc
+          echo "PATH=$HOME/neutron-clang/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Build Kernel
-      run: |
-        make -j$(nproc) O=out \
-          ARCH=arm64 \
-          CC=clang \
-          CROSS_COMPILE=~/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu- \
-          CROSS_COMPILE_ARM32=~/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/arm-none-eabi- \
-          LLVM=1 LLVM_IAS=1
+      - name: Setup ARM GNU Toolchain (for MTK)
+        run: |
+          wget https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+          tar -xf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz -C $HOME
+          echo "PATH=$HOME/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Collect artifacts
-      run: |
-        mkdir -p out/AnyKernel3
-        cp out/arch/arm64/boot/Image out/
-        gzip -c out/arch/arm64/boot/Image > out/Image.gz
-        cp out/arch/arm64/boot/dts/*.dtb out/ || true
-        cat out/arch/arm64/boot/dts/*.dtb > out/dtb.img || true
+      - name: Build Kernel
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-none-linux-gnu-
+          export PATH=$HOME/neutron-clang/bin:$HOME/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH
 
-        # Prepare AnyKernel3
-        git clone https://github.com/osm0sis/AnyKernel3 out/AnyKernel3
-        cp out/Image.gz out/AnyKernel3/zImage
-        cp out/dtb.img out/AnyKernel3/
-        cd out/AnyKernel3 && zip -r9 ../AnyKernel3-MTK.zip *
+          make O=out ARCH=arm64 gki_defconfig
+          make -j$(nproc) O=out ARCH=arm64
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: MTK-GKI-Kernel
-        path: |
-          out/Image
-          out/Image.gz
-          out/dtb.img
-          out/AnyKernel3-MTK.zip
-          
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build
+          path: |
+            out/arch/arm64/boot/Image
+            out/arch/arm64/boot/Image.gz
+            out/arch/arm64/boot/dts/**/*.dtb
+            
