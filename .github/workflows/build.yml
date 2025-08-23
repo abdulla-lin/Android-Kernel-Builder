@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang)
+name: Build CMF 1 Kernel (Wildlife AnyKernel)
 
 on:
   workflow_dispatch:
@@ -6,115 +6,56 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
 
     steps:
-      - name: Checkout kernel source
-        uses: actions/checkout@v4
-        with:
-          repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-          ref: main
-          fetch-depth: 0
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+        ref: main
 
-      - name: Show workflow file & repo (debug)
-        run: |
-          echo "Listing .github/workflows:"
-          ls -la .github/workflows || true
-          echo "PWD: $(pwd)"
-          echo "Files top-level:"
-          ls -la | sed -n '1,200p'
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          bc bison build-essential cpio curl flex gcc g++ \
+          git libssl-dev libncurses5-dev \
+          zlib1g-dev libelf-dev dwarves \
+          wget unzip xz-utils tar zstd \
+          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi zip
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            bc bison build-essential cpio curl flex gcc g++ \
-            git libssl-dev libncurses5-dev zlib1g-dev libelf-dev dwarves \
-            wget unzip xz-utils tar zstd python3 python3-pip rsync
+    - name: Download Neutron Clang (AntMan)
+      run: |
+        git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman
+        $HOME/antman/antman -S=10032024
 
-      - name: Download Neutron Clang (AntMan) - keep toolchain unchanged
-        run: |
-          set -e
-          # clone antman and install neutron clang (AntMan default installs under $HOME/toolchains)
-          git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman || true
-          chmod +x $HOME/antman/antman
-          # install stable snapshot - AntMan chooses layout; do not change it
-          bash $HOME/antman/antman -S || true
-          echo "Neutron install finished. Toolchain dir listing:"
-          ls -la $HOME/toolchains || true
-          echo "Toolchain bin (if present):"
-          ls -la $HOME/toolchains/neutron-clang/bin || true
-          echo "Adding to PATH"
-          echo "$HOME/toolchains/neutron-clang/bin" >> $GITHUB_PATH
-          echo "NEUTRON_BIN=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
+    - name: Build GKI kernel
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CC=clang
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+        export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
+        make O=out gki_defconfig
+        make -j$(nproc) O=out
 
-      - name: Toolchain sanity
-        run: |
-          echo "Which clang?"
-          which clang || true
-          clang --version || true
-          ld.lld --version || true
+    - name: Prepare Wildlife AnyKernel3 zip
+      run: |
+        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git
+        mkdir -p AnyKernel3/kernel
+        cp out/Image AnyKernel3/kernel/Image
+        cp out/Image.gz-dtb AnyKernel3/kernel/Image.gz-dtb
+        cp -r out/dtb/* AnyKernel3/kernel/dtb/
+        cp out/.config AnyKernel3/kernel/.config
 
-      - name: Ensure gki_defconfig exists
-        run: |
-          if [ -f arch/arm64/configs/gki_defconfig ]; then
-            echo "gki_defconfig found"
-          else
-            echo "ERROR: gki_defconfig not found under arch/arm64/configs" >&2
-            echo "Listing arch/arm64/configs:"
-            ls -la arch/arm64/configs || true
-            exit 1
-          fi
+    - name: Create Wildlife-style ZIP
+      run: |
+        cd AnyKernel3
+        zip -r ../cmf1-wildlife.zip ./*
 
-      - name: Build kernel (use Neutron clang exactly)
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/toolchains/neutron-clang/bin:$PATH"
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CC=$HOME/toolchains/neutron-clang/bin/clang
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-          export LD=$HOME/toolchains/neutron-clang/bin/ld.lld || true
-
-          mkdir -p out
-          echo "Running make O=out gki_defconfig"
-          make O=out gki_defconfig
-          echo "Start build..."
-          # We don't override other flags; let this toolchain behave as before.
-          make -j$(nproc) O=out CC="$CC" LLVM=1 LLVM_IAS=1 || ( echo "Build failed; print tail of log" && tail -n 200 out/.config || true && exit 1 )
-
-      - name: Prepare AnyKernel3 (Wildlife-style)
-        run: |
-          set -euo pipefail
-          OUTDIR=out/arch/arm64/boot
-          mkdir -p work
-          # pick the kernel artifact (prefer Image.gz-dtb -> Image.gz -> Image)
-          if [ -f "$OUTDIR/Image.gz-dtb" ]; then
-            KIMG="$OUTDIR/Image.gz-dtb"
-          elif [ -f "$OUTDIR/Image.gz" ]; then
-            KIMG="$OUTDIR/Image.gz"
-          elif [ -f "$OUTDIR/Image" ]; then
-            KIMG="$OUTDIR/Image"
-          else
-            echo "ERROR: No kernel image found in $OUTDIR" >&2
-            ls -la "$OUTDIR" || true
-            exit 1
-          fi
-          echo "Selected kernel image: $KIMG"
-          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3 || git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-          rm -rf AnyKernel3/.git || true
-          cp "$KIMG" AnyKernel3/Image
-          cd AnyKernel3
-          zip -r9 ../cmf1-anykernel.zip ./*
-          cd ..
-          ls -la cmf1-anykernel.zip
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: cmf1-kernel-artifacts
-          path: |
-            cmf1-anykernel.zip
-            out/arch/arm64/boot/Image*
-            out/arch/arm64/boot/dts/**/*.dtb
+    - name: Upload Wildlife AnyKernel zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: cmf1-wildlife-kernel
+        path: cmf1-wildlife.zip
