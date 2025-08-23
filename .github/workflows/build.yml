@@ -1,4 +1,4 @@
-name: Build GKI Kernel (Image Only)
+name: Build MTK GKI Kernel Image
 
 on:
   push:
@@ -9,13 +9,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Build Kernel
+    name: Build Kernel Image
 
     env:
       ARCH: arm64
       LOCALVERSION: -NeutronClang
       KBUILD_BUILD_USER: github
       KBUILD_BUILD_HOST: actions
+      CROSS_COMPILE: /usr/bin/aarch64-linux-gnu-
+      KBUILD_IGNORE_BTF: 1
 
     steps:
     - name: Checkout Kernel Source
@@ -28,8 +30,9 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y build-essential clang lld llvm libelf-dev zlib1g-dev libncurses-dev \
-          python3 git bc flex bison zip
+        sudo apt install -y build-essential clang lld llvm git bc flex bison libncurses-dev \
+          libelf-dev zlib1g-dev python3 python-is-python3 wget curl p7zip-full \
+          device-tree-compiler libtinfo6 cpio kmod zip
 
     - name: Setup Neutron-Clang Toolchain
       run: |
@@ -38,22 +41,38 @@ jobs:
         curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
         chmod +x antman
         bash antman -S
+        bash antman --patch=glibc
+        cd $GITHUB_WORKSPACE
 
-    - name: Set Environment Variables
+    - name: Set Toolchain Paths
       run: |
         echo "PATH=$HOME/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
+        echo "NEUTRON_PATH=$HOME/toolchains/neutron-clang/bin" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=$HOME/toolchains/neutron-clang/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
-    - name: Configure Kernel (GKI)
+    - name: Configure Kernel
       run: |
-        rm -rf out build
         mkdir -p out build
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out gki_defconfig
         make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out olddefconfig
 
-    - name: Build Kernel Image (skip BPF)
+    - name: Build Kernel Image
       run: |
-        make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out Image KBUILD_IGNORE_BTF=1 -j$(nproc)
-        cp out/arch/arm64/boot/Image build/
+        make -C $GITHUB_WORKSPACE O=$GITHUB_WORKSPACE/out \
+          Image \
+          CC=$HOME/toolchains/neutron-clang/bin/clang \
+          AR=$HOME/toolchains/neutron-clang/bin/llvm-ar \
+          NM=$HOME/toolchains/neutron-clang/bin/llvm-nm \
+          LD=$HOME/toolchains/neutron-clang/bin/ld.lld \
+          STRIP=$HOME/toolchains/neutron-clang/bin/llvm-strip \
+          OBJCOPY=$HOME/toolchains/neutron-clang/bin/llvm-objcopy \
+          OBJDUMP=$HOME/toolchains/neutron-clang/bin/llvm-objdump \
+          READELF=$HOME/toolchains/neutron-clang/bin/llvm-readelf \
+          HOSTCC=$HOME/toolchains/neutron-clang/bin/clang \
+          HOSTCXX=$HOME/toolchains/neutron-clang/bin/clang++ \
+          KBUILD_IGNORE_BTF=1 \
+          -j$(nproc)
+        cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/build/
 
     - name: Upload Kernel Image
       uses: actions/upload-artifact@v4
