@@ -18,15 +18,15 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential flex git libncurses-dev \
-          libssl-dev python3 python3-pip ccache wget curl unzip
+          libssl-dev python3 python3-pip ccache wget curl unzip zstd
 
-    - name: Download Neutron Clang
+    - name: Download Neutron Clang (direct link)
       run: |
         mkdir -p ~/toolchains
         cd ~/toolchains
-        curl -LO https://raw.githubusercontent.com/Neutron-Clang/antman/main/antman
-        chmod +x antman
-        ./antman -S 10032024
+        wget -q https://github.com/Neutron-Clang/neutron-clang/releases/download/Neutron-19/Neutron-19.tar.zst
+        tar --use-compress-program=unzstd -xvf Neutron-19.tar.zst
+        rm Neutron-19.tar.zst
 
     - name: Build Kernel
       run: |
@@ -64,10 +64,7 @@ jobs:
         # Replace kernel
         cp build/Image.gz kernel
 
-        # Preserve stock DTB/ramdisk
-        if [ -f dtb ]; then echo "Keeping stock DTB..."; fi
-        if [ -f extra ]; then echo "Keeping stock extra (dtbo)..."; fi
-
+        # Keep stock ramdisk + dtb
         ./tools/magiskboot repack stock_boot.img new-boot.img
         mv new-boot.img repacked_boot.img
 
