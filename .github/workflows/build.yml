@@ -37,7 +37,7 @@ jobs:
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH:$PATH
-        make O=out defconfig
+        make O=out cmf_defconfig
         make -j$(nproc) O=out
 
     - name: Prepare AnyKernel3
