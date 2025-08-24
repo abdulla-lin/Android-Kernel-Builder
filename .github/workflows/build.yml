@@ -27,7 +27,7 @@ jobs:
 
       - name: Apply Device Defconfig
         run: |
-          make O=out mt6878_defconfig
+          make O=out defconfig
 
       - name: Build Kernel
         run: |
