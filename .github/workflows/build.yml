@@ -1,4 +1,4 @@
-name: Build CMF 1 Kernel (Wildlife AnyKernel)
+name: Build CMF Phone 1 Kernel (Neutron Clang + Wildlife AnyKernel)
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
           git libssl-dev libncurses5-dev \
           zlib1g-dev libelf-dev dwarves \
           wget unzip xz-utils tar zstd \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi zip
+          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
     - name: Download Neutron Clang (AntMan)
       run: |
@@ -37,6 +37,7 @@ jobs:
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
+
         make O=out gki_defconfig
         make -j$(nproc) O=out
 
@@ -44,18 +45,30 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git
         mkdir -p AnyKernel3/kernel
-        cp out/Image AnyKernel3/kernel/Image
-        cp out/Image.gz-dtb AnyKernel3/kernel/Image.gz-dtb
-        cp -r out/dtb/* AnyKernel3/kernel/dtb/
-        cp out/.config AnyKernel3/kernel/.config
+        cp out/Image.gz AnyKernel3/kernel/Image.gz
+        cp out/Image.gz-dtb AnyKernel3/kernel/Image.gz-dtb || true
 
-    - name: Create Wildlife-style ZIP
+        # Copy DTBs
+        mkdir -p AnyKernel3/kernel/dtb
+        if [ -d out/arch/arm64/boot/dts/ ]; then
+          cp -r out/arch/arm64/boot/dts/* AnyKernel3/kernel/dtb/
+        fi
+
+        # Copy device overlays if exist
+        if [ -d out/arch/arm64/boot/dts/overlays ]; then
+          cp -r out/arch/arm64/boot/dts/overlays/* AnyKernel3/kernel/dtb/
+        fi
+
+        # Copy kernel config for debugging
+        cp out/.config AnyKernel3/kernel/.config || true
+
+    - name: Create Wildlife AnyKernel Zip
       run: |
         cd AnyKernel3
-        zip -r ../cmf1-wildlife.zip ./*
+        zip -r9 ../cmf1-wildlife-anykernel.zip ./*
 
-    - name: Upload Wildlife AnyKernel zip
+    - name: Upload Wildlife AnyKernel Zip
       uses: actions/upload-artifact@v4
       with:
-        name: cmf1-wildlife-kernel
-        path: cmf1-wildlife.zip
+        name: cmf1-wildlife-anykernel
+        path: cmf1-wildlife-anykernel.zip
