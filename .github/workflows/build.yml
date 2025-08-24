@@ -1,14 +1,19 @@
-name: Build GKI Kernel 6.1.68
+name: Build Wild GKI Kernel 6.1.68
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout Wild GKI Kernel Source
         uses: actions/checkout@v4
+        with:
+          repository: WildPlusKernel/GKI_KernelSU_SUSFS
+          path: kernel_wild
+          ref: gki-android14-6.1
 
       - name: Install Dependencies
         run: |
@@ -16,18 +21,14 @@ jobs:
           sudo apt install -y bc bison build-essential curl flex git \
             libssl-dev libncurses5-dev zip unzip ccache libelf-dev python3
 
-      - name: Clone GKI Kernel Source
-        run: |
-          git clone https://android.googlesource.com/kernel/common.git -b android14-6.1 kernel_gki
-
-      - name: Clone Clang Toolchain
+      - name: Setup Clang Toolchain
         run: |
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86.git \
             --branch android14-release clang-prebuilt
 
-      - name: Build Kernel (6.1.68)
+      - name: Build Kernel (GKI 6.1.68)
         run: |
-          cd kernel_gki
+          cd kernel_wild
           mkdir out
           export PATH=$GITHUB_WORKSPACE/clang-prebuilt/clang-r487747c/bin:$PATH
           export ARCH=arm64
@@ -36,16 +37,16 @@ jobs:
           make O=out gki_defconfig
           make O=out -j$(nproc) LOCALVERSION=-6.1.68
 
-      - name: Package AnyKernel3 Zip
+      - name: Prepare AnyKernel3 Zip
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
-          cp kernel_gki/out/arch/arm64/boot/Image.gz anykernel/Image.gz
+          cp kernel_wild/out/arch/arm64/boot/Image.gz anykernel/
           cd anykernel
           rm -rf *.dtb *.dtbo
-          zip -r9 ../AnyKernel-GKI-6.1.68.zip *
+          zip -r9 ../Wild-GKI-6.1.68.zip *
 
-      - name: Upload AnyKernel Artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AnyKernel-GKI-6.1.68
-          path: AnyKernel-GKI-6.1.68.zip
+          name: Wild-GKI-6.1.68
+          path: Wild-GKI-6.1.68.zip
