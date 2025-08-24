@@ -1,4 +1,4 @@
-name: Build GKI Kernel 6.1.68 (Neutron Clang + GNU)
+name: Build GKI Kernel 6.1.68
 
 on:
   workflow_dispatch:
@@ -8,54 +8,61 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout kernel source
-        uses: actions/checkout@v4
+      # 1️⃣ Checkout GKI kernel source
+      - name: Clone GKI Kernel Source
+        run: |
+          git clone --depth=1 -b android14-6.1 https://android.googlesource.com/kernel/common kernel_gki
 
-      - name: Install dependencies
+      # 2️⃣ Install dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            git wget curl zip unzip bc bison flex build-essential \
-            libncurses5-dev libssl-dev ccache python3 python3-pip \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          sudo apt-get install -y bc bison build-essential cpio curl flex git \
+            libssl-dev libncurses5-dev zlib1g-dev libelf-dev dwarves \
+            wget unzip xz-utils tar zstd gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-      - name: Clone GKI kernel source (v6.1.68)
-        run: |
-          git clone https://android.googlesource.com/kernel/common kernel
-          cd kernel
-          git checkout v6.1.68
-
-      - name: Setup Neutron Clang (AntMan)
+      # 3️⃣ Setup Neutron Clang + GNU
+      - name: Setup Toolchains
         run: |
           git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman
           $HOME/antman/antman -S=10032024
-          echo "PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH" >> $GITHUB_ENV
+          # GNU already available via Ubuntu packages
 
-      - name: Build kernel
+      # 4️⃣ Build the kernel
+      - name: Build Kernel
         run: |
-          cd kernel
+          cd kernel_gki
+          mkdir -p out
+          export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
           export CC=clang
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          # Use GKI defconfig from Google
           make O=out gki_defconfig
+          # Force kernel version 6.1.68
+          echo "6.1.68" > localversion
           make -j$(nproc) O=out
-          echo "KERNEL_VER=$(make kernelversion)" >> $GITHUB_ENV
 
+      # 5️⃣ Prepare AnyKernel3
       - name: Prepare AnyKernel3
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel
-          cp kernel/out/arch/arm64/boot/Image AnyKernel/ 2>/dev/null || true
-          cp kernel/out/arch/arm64/boot/Image.gz AnyKernel/ 2>/dev/null || true
+          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel
+          cp kernel_gki/out/arch/arm64/boot/Image.gz AnyKernel/Image.gz
+          cd AnyKernel
+          # Remove any dtb/dtbo
+          rm -rf *.dtb *.dtbo
 
-      - name: Pack AnyKernel3 ZIP
+      # 6️⃣ Pack AnyKernel3 ZIP
+      - name: Pack AnyKernel ZIP
         run: |
           cd AnyKernel
-          zip -r9 ../Kernel-${KERNEL_VER}.zip *
+          zip -r9 ../GKI_Kernel_6.1.68.zip *
 
-      - name: Upload artifact
+      # 7️⃣ Upload artifact
+      - name: Upload Kernel ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-${{ env.KERNEL_VER }}
-          path: Kernel-${{ env.KERNEL_VER }}.zip
+          name: GKI_Kernel_6.1.68
+          path: GKI_Kernel_6.1.68.zip
