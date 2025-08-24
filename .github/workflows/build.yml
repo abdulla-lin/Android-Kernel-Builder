@@ -1,60 +1,51 @@
-name: Build-GKI-Kernel
+name: Build GKI Kernel 6.1.68
 
-on:
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
           sudo apt update
           sudo apt install -y bc bison build-essential curl flex git \
-            libssl-dev libncurses5-dev libncursesw5-dev zip unzip ccache \
-            libelf-dev liblz4-tool python3 python3-pip
+            libssl-dev libncurses5-dev zip unzip ccache libelf-dev python3
 
       - name: Clone GKI Kernel Source
         run: |
-          git clone https://android.googlesource.com/kernel/common -b android14-6.1 kernel_gki
+          git clone https://android.googlesource.com/kernel/common.git -b android14-6.1 kernel_gki
 
-      - name: Setup Clang Toolchain
+      - name: Clone Clang Toolchain
         run: |
-          mkdir clang
-          curl -LO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz
-          tar -C clang/ -xf clang-r487747c.tar.gz
+          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86.git \
+            --branch android14-release clang-prebuilt
 
-      - name: Build Kernel
+      - name: Build Kernel (6.1.68)
         run: |
           cd kernel_gki
           mkdir out
-          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          export PATH=$GITHUB_WORKSPACE/clang-prebuilt/clang-r487747c/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
           export CC=clang
-          # Force kernel version to 6.1.68
-          echo "6.1.68" > localversion
           make O=out gki_defconfig
-          make O=out -j$(nproc)
+          make O=out -j$(nproc) LOCALVERSION=-6.1.68
 
-      - name: Prepare AnyKernel3
+      - name: Package AnyKernel3 Zip
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
-          cp kernel_gki/out/arch/arm64/boot/Image.gz anykernel/
+          cp kernel_gki/out/arch/arm64/boot/Image.gz anykernel/Image.gz
           cd anykernel
-          # remove unused files
           rm -rf *.dtb *.dtbo
-
-      - name: Pack AnyKernel3 ZIP
-        run: |
-          cd anykernel
           zip -r9 ../AnyKernel-GKI-6.1.68.zip *
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+      - name: Upload AnyKernel Artifact
+        uses: actions/upload-artifact@v4
         with:
           name: AnyKernel-GKI-6.1.68
           path: AnyKernel-GKI-6.1.68.zip
