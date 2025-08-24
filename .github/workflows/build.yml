@@ -11,7 +11,7 @@ jobs:
     - name: Checkout kernel source
       uses: actions/checkout@v4
       with:
-        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+        repository: https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878
         ref: main
 
     - name: Install dependencies
