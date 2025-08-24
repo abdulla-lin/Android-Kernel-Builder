@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang + Wildlife AnyKernel)
+name: Build CMF 1 Kernel (Neutron Clang + AnyKernel3)
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
     - name: Checkout kernel source
@@ -19,17 +20,15 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           bc bison build-essential cpio curl flex gcc g++ \
-          git libssl-dev libncurses5-dev \
-          zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar zstd \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          git libssl-dev libncurses5-dev zlib1g-dev libelf-dev dwarves \
+          wget unzip xz-utils tar zstd gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
     - name: Download Neutron Clang (AntMan)
       run: |
         git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman
         $HOME/antman/antman -S=10032024
 
-    - name: Build GKI kernel
+    - name: Build GKI Kernel
       run: |
         export ARCH=arm64
         export SUBARCH=arm64
@@ -37,26 +36,29 @@ jobs:
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
+        mkdir -p out
         make O=out gki_defconfig
-        make -j$(nproc) O=out
+        make -j$(nproc) O=out Image.gz dtbs
 
-    - name: Prepare AnyKernel3
+    - name: Clone AnyKernel3
+      run: git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git
+
+    - name: Copy Kernel & DTB to AnyKernel3
       run: |
-        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git
-        mkdir -p AnyKernel3
+        mkdir -p AnyKernel3/kernel
+        cp out/arch/arm64/boot/Image.gz AnyKernel3/kernel/
+        cp out/arch/arm64/boot/dts/mediatek/mt6878.dtb AnyKernel3/kernel/
 
-    - name: Copy kernel and config to AnyKernel3
-      run: |
-        cp out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
-        cp out/.config AnyKernel3/.config || true
+    - name: Copy kernel config for debugging
+      run: cp out/.config AnyKernel3/kernel/.config || true
 
-    - name: Zip Wildlife AnyKernel
+    - name: Create Wildlife-style AnyKernel3 zip
       run: |
         cd AnyKernel3
-        zip -r9 ../CMF_Wildlife_Kernel.zip ./*
+        zip -r ../cmf1-wildlife-kernel.zip ./*
 
-    - name: Upload AnyKernel zip
+    - name: Upload Kernel Zip
       uses: actions/upload-artifact@v4
       with:
-        name: CMF_Wildlife_Kernel
-        path: CMF_Wildlife_Kernel.zip
+        name: cmf1-wildlife-kernel
+        path: cmf1-wildlife-kernel.zip
