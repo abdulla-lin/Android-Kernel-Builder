@@ -38,7 +38,7 @@ jobs:
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
         # Use your live ROM defconfig
-        make O=out cmf_config
+        make O=out _config
         make -j$(nproc) O=out
 
     - name: Prepare AnyKernel3
