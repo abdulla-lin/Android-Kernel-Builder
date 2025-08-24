@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang + GNU)
+name: Build CMF Phone 1 Kernel (Neutron Clang + cmf_config)
 
 on:
   workflow_dispatch:
@@ -6,11 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    env:
-      KERNEL_ROOT: ${{ github.workspace }}
-      ANYKERNEL_ROOT: ${{ github.workspace }}/AnyKernel3
-      BUILD_OUT: ${{ github.workspace }}/out
 
     steps:
     - name: Checkout kernel source
@@ -24,18 +19,18 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           bc bison build-essential cpio curl flex gcc g++ \
-          git libssl-dev libncurses5-dev \
-          zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar zstd \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          git libssl-dev libncurses5-dev zlib1g-dev libelf-dev dwarves \
+          wget unzip xz-utils tar zstd gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
     - name: Download Neutron Clang (AntMan)
       run: |
         git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman
         $HOME/antman/antman -S=10032024
-    - name: Checkout AnyKernel3
+    - name: Setup kernel config
       run: |
-        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git
-    - name: Build GKI Kernel
+        mkdir -p out
+        cp config/cmf_config out/.config
+        make O=out olddefconfig
+    - name: Build GKI kernel
       run: |
         export ARCH=arm64
         export SUBARCH=arm64
@@ -43,22 +38,19 @@ jobs:
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
-        mkdir -p $BUILD_OUT
-        cp arch/arm64/configs/gki_defconfig $BUILD_OUT/.config
-        make O=$BUILD_OUT gki_defconfig
-        make -j$(nproc) O=$BUILD_OUT Image.gz dtbs
-    - name: Copy kernel and DTB to AnyKernel3
+        make -j$(nproc) O=out Image.gz dtbs
+    - name: Prepare AnyKernel3
       run: |
-        mkdir -p $ANYKERNEL_ROOT/kernel
-        cp $BUILD_OUT/arch/arm64/boot/Image.gz $ANYKERNEL_ROOT/kernel/Image.gz
-        cp $BUILD_OUT/arch/arm64/boot/dts/mediatek/mt6878.dtb $ANYKERNEL_ROOT/kernel/mt6878.dtb
-        cp $BUILD_OUT/.config $ANYKERNEL_ROOT/kernel/.config || true
-    - name: Create AnyKernel Zip
+        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git
+        cp out/arch/arm64/boot/Image.gz AnyKernel3/kernel/Image.gz
+        cp out/arch/arm64/boot/dts/mediatek/mt6878.dtb AnyKernel3/kernel/mt6878.dtb
+        cp out/.config AnyKernel3/kernel/.config || true
+    - name: Zip AnyKernel3
       run: |
-        cd $ANYKERNEL_ROOT
-        zip -r CMF1_Wildlife_AnyKernel3.zip *
-    - name: Upload AnyKernel3 Zip
+        cd AnyKernel3
+        zip -r ../cmf_kernel_anykernel.zip *
+    - name: Upload kernel artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: CMF1_Wildlife_AnyKernel3
-        path: AnyKernel3/CMF1_Wildlife_AnyKernel3.zip
+        name: cmf1-kernel
+        path: cmf_kernel_anykernel.zip
