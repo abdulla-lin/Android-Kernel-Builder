@@ -8,17 +8,18 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout (dummy repo)
+      - name: Checkout kernel source
         uses: actions/checkout@v4
 
-      - name: Install build deps + GNU toolchains
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git wget curl zip unzip bc bison flex \
-            build-essential libncurses5-dev libssl-dev ccache python3 \
+          sudo apt-get install -y \
+            git wget curl zip unzip bc bison flex build-essential \
+            libncurses5-dev libssl-dev ccache python3 python3-pip \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-      - name: Clone GKI kernel source (locked to 6.1.68)
+      - name: Clone GKI kernel source (v6.1.68)
         run: |
           git clone https://android.googlesource.com/kernel/common kernel
           cd kernel
@@ -42,11 +43,14 @@ jobs:
           make -j$(nproc) O=out
           echo "KERNEL_VER=$(make kernelversion)" >> $GITHUB_ENV
 
-      - name: Pack AnyKernel3
+      - name: Prepare AnyKernel3
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel
           cp kernel/out/arch/arm64/boot/Image AnyKernel/ 2>/dev/null || true
           cp kernel/out/arch/arm64/boot/Image.gz AnyKernel/ 2>/dev/null || true
+
+      - name: Pack AnyKernel3 ZIP
+        run: |
           cd AnyKernel
           zip -r9 ../Kernel-${KERNEL_VER}.zip *
 
