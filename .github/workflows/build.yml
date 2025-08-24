@@ -1,4 +1,4 @@
-name: Build Wild GKI Kernel 6.1.68
+name: Build GKI Kernel
 
 on:
   workflow_dispatch:
@@ -8,45 +8,51 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Wild GKI Kernel Source
-        uses: actions/checkout@v4
-        with:
-          repository: WildPlusKernel/GKI_KernelSU_SUSFS
-          path: kernel_wild
-          ref: gki-android14-6.1
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y bc bison build-essential curl flex git \
-            libssl-dev libncurses5-dev zip unzip ccache libelf-dev python3
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc bison flex libssl-dev \
+            libncurses5-dev git curl zip unzip ccache wget
 
-      - name: Setup Clang Toolchain
-        run: |
-          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86.git \
-            --branch android14-release clang-prebuilt
+    - name: Download Clang 17 (AOSP prebuilt)
+      run: |
+        mkdir clang
+        cd clang
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r487747c.tar.gz
+        tar -xf clang-r487747c.tar.gz
+        cd ..
 
-      - name: Build Kernel (GKI 6.1.68)
-        run: |
-          cd kernel_wild
-          mkdir out
-          export PATH=$GITHUB_WORKSPACE/clang-prebuilt/clang-r487747c/bin:$PATH
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CC=clang
-          make O=out gki_defconfig
-          make O=out -j$(nproc) LOCALVERSION=-6.1.68
+    - name: Clone Kernel Source
+      run: |
+        git clone --depth=1 --branch android14-6.1 https://android.googlesource.com/kernel/common kernel
 
-      - name: Prepare AnyKernel3 Zip
-        run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git anykernel
-          cp kernel_wild/out/arch/arm64/boot/Image.gz anykernel/
-          cd anykernel
-          rm -rf *.dtb *.dtbo
-          zip -r9 ../Wild-GKI-6.1.68.zip *
+    - name: Build Kernel
+      run: |
+        export PATH=$PWD/clang/bin:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CC=clang
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+        cd kernel
+        make gki_defconfig
+        make -j$(nproc)
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Wild-GKI-6.1.68
-          path: Wild-GKI-6.1.68.zip
+    - name: Clone AnyKernel3
+      run: |
+        git clone https://github.com/osm0sis/AnyKernel3 AnyKernel3
+
+    - name: Pack AnyKernel3
+      run: |
+        cd AnyKernel3
+        cp ../kernel/arch/arm64/boot/Image .
+        zip -r9 Kernel-6.1.68.zip * -x .git README.md *placeholder
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build
+        path: AnyKernel3/Kernel-6.1.68.zip
