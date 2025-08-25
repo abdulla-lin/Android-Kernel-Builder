@@ -27,9 +27,9 @@ jobs:
         git clone https://github.com/abdulla-lin/KernelSU.git kernelSU
         git clone https://github.com/abdulla-lin/susfs4ksu-module.git susfs
 
-        # Copy SuSFS into kernel source
+        # Copy only SuSFS module sources
         mkdir -p drivers/susfs
-        cp -r susfs/* drivers/susfs/
+        cp -r susfs/module/* drivers/susfs/
 
         # Register SuSFS in kernel build system
         echo "obj-y += susfs/" >> drivers/Makefile
