@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (LLVM Fast)
+name: Build CMF Phone 1 Kernel + DTB (LLVM ThinLTO)
 
 on:
   workflow_dispatch:
@@ -18,49 +18,66 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          bc bison build-essential cpio curl flex git libssl-dev \
-          libncurses5-dev zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar clang lld llvm binutils
+          bc bison build-essential cpio curl flex \
+          git libssl-dev libncurses5-dev zlib1g-dev \
+          libelf-dev dwarves wget unzip xz-utils tar ccache
+
+    - name: Restore ccache
+      uses: actions/cache@v3
+      with:
+        path: .ccache
+        key: ${{ runner.os }}-cmf-kernel-${{ hashFiles('**/arch/arm64/configs/gki_defconfig') }}
+        restore-keys: |
+          ${{ runner.os }}-cmf-kernel-
 
     - name: Setup LLVM toolchain
       run: |
         export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
+        export USE_CCACHE=1
+        export CCACHE_DIR=$GITHUB_WORKSPACE/.ccache
         export ARCH=arm64
         export SUBARCH=arm64
         export CC=clang
         export LLVM=1
         export LLVM_IAS=1
-        export USE_CCACHE=0
+        export KCFLAGS="-O3 -flto=thin -fno-plt -fomit-frame-pointer"
         echo "PATH=$PATH" >> $GITHUB_ENV
+        echo "USE_CCACHE=1" >> $GITHUB_ENV
+        echo "CCACHE_DIR=$CCACHE_DIR" >> $GITHUB_ENV
         echo "ARCH=arm64" >> $GITHUB_ENV
         echo "SUBARCH=arm64" >> $GITHUB_ENV
         echo "CC=clang" >> $GITHUB_ENV
         echo "LLVM=1" >> $GITHUB_ENV
         echo "LLVM_IAS=1" >> $GITHUB_ENV
-        echo "USE_CCACHE=0" >> $GITHUB_ENV
+        echo "KCFLAGS=$KCFLAGS" >> $GITHUB_ENV
 
-    - name: Build Kernel only
+    - name: Build Kernel + DTB
       run: |
         make O=out gki_defconfig
-        make -j4 O=out CC=clang LLVM=1 LLVM_IAS=1
+        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
+        make O=out dtbs -j$(nproc) CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
 
     - name: Prepare AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
+        # Copy kernel image
         cp out/arch/arm64/boot/Image AnyKernel3/Image
+        # Copy all DTBs
+        cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ || true
         # Optional: copy dtbo.img if exists
         if [ -f out/arch/arm64/boot/dtbo.img ]; then
           cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
         fi
+        # Copy kernel config for reference/debug
         cp out/.config AnyKernel3/.config || true
 
     - name: Pack AnyKernel3 ZIP
       run: |
         cd AnyKernel3
-        zip -r9 ../CMF_Kernel-6.1.68.zip *
+        zip -r9 ../CMF_Kernel-6.1.68-ThinLTO.zip *
 
     - name: Upload AnyKernel3 ZIP
       uses: actions/upload-artifact@v4
       with:
-        name: CMF_Kernel-6.1.68
-        path: CMF_Kernel-6.1.68.zip
+        name: CMF_Kernel-6.1.68-ThinLTO
+        path: CMF_Kernel-6.1.68-ThinLTO.zip
