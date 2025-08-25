@@ -12,7 +12,18 @@ jobs:
       PATH: ${{ github.workspace }}/bin:${{ env.PATH }}
 
     steps:
-      # 1️⃣ Install repo tool
+      # 1️⃣ Checkout this workflow repo (optional)
+      - name: Checkout Workflow Repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Install dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git wget curl zip unzip bc bison flex build-essential \
+            libncurses5-dev libssl-dev ccache python3 python3-pip openjdk-17-repo
+
+      # 3️⃣ Install repo tool
       - name: Install repo tool
         run: |
           mkdir -p ~/bin
@@ -21,39 +32,45 @@ jobs:
           export PATH=~/bin:$PATH
           repo --version
 
-      # 2️⃣ Checkout Infinity-X manifest
-      - name: Checkout Infinity-X manifest
+      # 4️⃣ Initialize Infinity-X source
+      - name: Initialize Infinity-X source
         run: |
           export PATH=~/bin:$PATH
+          mkdir -p infinity_source
+          cd infinity_source
           repo init -u https://github.com/ProjectInfinity-X/manifest -b 16 --git-lfs --no-repo-verify
           repo sync -c --no-tags --depth=1
 
-      # 3️⃣ Clone device trees
+      # 5️⃣ Clone device, kernel, and vendor trees
       - name: Clone device trees
         run: |
+          cd infinity_source
           git clone --depth=1 -b infinity-16 https://github.com/abdulla-lin/android_device_nothing_tetris device/nothing/tetris
           git clone --depth=1 -b lineage-22.2 https://github.com/abdulla-lin/android_device_nothing_tetris-kernel kernel/nothing/tetris
           git clone --depth=1 -b a15 https://gitlab.com/achugaming512/android_vendor_nothing_tetris vendor/nothing/tetris
 
-      # 4️⃣ Setup environment
+      # 6️⃣ Setup build environment
       - name: Setup environment
         run: |
+          cd infinity_source
           source build/envsetup.sh
           lunch infinity_tetris-userdebug
 
-      # 5️⃣ Copy prebuilt kernel (optional)
+      # 7️⃣ Copy prebuilt kernel (optional)
       - name: Copy prebuilt kernel
         run: |
+          cd infinity_source
           cp -r kernel/nothing/tetris/prebuilt/* out/target/product/tetris/ || true
 
-      # 6️⃣ Build ROM
+      # 8️⃣ Build ROM
       - name: Build ROM
         run: |
-          mka bacon -j$(nproc)
+          cd infinity_source
+          make -j$(nproc) bacon
 
-      # 7️⃣ Upload built ROM as artifact
-      - name: Upload built ROM
+      # 9️⃣ Upload built ROM
+      - name: Upload ROM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Infinity-X-Tetris-ROM
-          path: out/target/product/tetris/*.zip
+          name: Infinity-Tetris-ROM
+          path: infinity_source/out/target/product/tetris/*.zip
