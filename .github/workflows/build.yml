@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SuKisu Built-in)
+name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SuKisu)
 
 on:
   workflow_dispatch:
@@ -22,20 +22,23 @@ jobs:
           libncurses5-dev zlib1g-dev libelf-dev dwarves \
           wget unzip xz-utils tar clang lld llvm binutils
 
-    - name: Clone SuKisu (KernelSU fork) + SuSFS
+    - name: Clone SuKisu + SuSFS
       run: |
         git clone https://github.com/abdulla-lin/KernelSU.git kernelSU
         git clone https://github.com/abdulla-lin/susfs4ksu-module.git susfs
 
-        # Copy SuSFS into kernel source
+        # Copy SuSFS into kernel as a core driver
         mkdir -p drivers/susfs
         cp -r susfs/* drivers/susfs/
 
-        # Register SuSFS in kernel build system
-        echo "obj-y += susfs/" >> drivers/Makefile
-        echo 'source "drivers/susfs/Kconfig"' >> drivers/Kconfig
+        # Create minimal Makefile and Kconfig for SuSFS
+        echo 'obj-$(CONFIG_SUSFS) += susfs.o' > drivers/susfs/Makefile
+        echo 'config SUSFS\n\ttristate "SuSFS filesystem support"\n\thelp\n\t  SuSFS is required for KernelSU.' > drivers/susfs/Kconfig
 
-        # Copy KernelSU core files (adjust if needed)
+        # Link SuSFS Kconfig in main drivers/Kconfig
+        grep -qxF 'source "drivers/susfs/Kconfig"' drivers/Kconfig || echo 'source "drivers/susfs/Kconfig"' >> drivers/Kconfig
+
+        # Copy KernelSU into kernel
         cp -r kernelSU/* .
 
     - name: Setup LLVM toolchain
@@ -63,7 +66,7 @@ jobs:
         scripts/config --file out/.config -e LTO -e LTO_CLANG -e THINLTO
         scripts/config --file out/.config -d LTO_NONE -d LTO_GCC -d LTO_FULL
 
-        # Enable SuKisu + SuSFS as built-in
+        # Enable SuKisu + SuSFS
         scripts/config --file out/.config -e CONFIG_SUKISU -e CONFIG_SUSFS
 
         # Set custom About Phone string
