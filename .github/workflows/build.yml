@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + DTB (LLVM ThinLTO Aggressive)
+name: Build CMF Phone 1 Kernel + DTB (LLVM ThinLTO)
 
 on:
   workflow_dispatch:
@@ -19,8 +19,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           bc bison build-essential cpio curl flex git \
-          libssl-dev libncurses5-dev zlib1g-dev libelf-dev \
-          dwarves wget unzip xz-utils tar ccache
+          libssl-dev libncurses5-dev zlib1g-dev libelf-dev dwarves \
+          wget unzip xz-utils tar ccache
 
     - name: Restore ccache
       uses: actions/cache@v3
@@ -35,12 +35,6 @@ jobs:
         export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
         export CC=clang
         export LD=ld.lld
-        export AR=llvm-ar
-        export NM=llvm-nm
-        export OBJCOPY=llvm-objcopy
-        export OBJDUMP=llvm-objdump
-        export READELF=llvm-readelf
-        export STRIP=llvm-strip
         export USE_CCACHE=1
         export CCACHE_DIR=$GITHUB_WORKSPACE/.ccache
         export ARCH=arm64
@@ -48,23 +42,32 @@ jobs:
         echo "PATH=$PATH" >> $GITHUB_ENV
         echo "CC=$CC" >> $GITHUB_ENV
         echo "LD=$LD" >> $GITHUB_ENV
-        echo "USE_CCACHE=1" >> $GITHUB_ENV
+        echo "USE_CCACHE=$USE_CCACHE" >> $GITHUB_ENV
         echo "CCACHE_DIR=$CCACHE_DIR" >> $GITHUB_ENV
         echo "ARCH=$ARCH" >> $GITHUB_ENV
         echo "SUBARCH=$SUBARCH" >> $GITHUB_ENV
 
-    - name: Build Kernel + DTB (Aggressive ThinLTO)
+    - name: Verify LLVM toolchain
+      run: |
+        clang --version
+        ld.lld --version
+
+    - name: Build Kernel + DTB (ThinLTO)
       run: |
         make O=out gki_defconfig
-        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 LTO_ISEL=1
-        make O=out dtbs -j$(nproc) CC=clang LLVM=1 LLVM_IAS=1 LTO_ISEL=1
+        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 \
+             LTO=thin \
+             LLD=1 \
+             LD=ld.lld
+        make O=out dtbs -j$(nproc) CC=clang LLVM=1 LLVM_IAS=1 \
+             LTO=thin LD=ld.lld
 
     - name: Prepare AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
         # Copy kernel image
         cp out/arch/arm64/boot/Image AnyKernel3/Image
-        # Copy all DTB files
+        # Copy DTB files (all vendor dtbs)
         cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ || true
         # Optional: copy dtbo.img if exists
         if [ -f out/arch/arm64/boot/dtbo.img ]; then
@@ -76,10 +79,10 @@ jobs:
     - name: Pack AnyKernel3 ZIP
       run: |
         cd AnyKernel3
-        zip -r9 ../CMF_Kernel-6.1.68.zip *
+        zip -r9 ../CMF_Kernel-6.1.68-ThinLTO.zip *
 
     - name: Upload AnyKernel3 ZIP
       uses: actions/upload-artifact@v4
       with:
-        name: CMF_Kernel-6.1.68
-        path: CMF_Kernel-6.1.68.zip
+        name: CMF_Kernel-6.1.68-ThinLTO
+        path: CMF_Kernel-6.1.68-ThinLTO.zip
