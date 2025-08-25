@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + DTB (LLVM ThinLTO)
+name: Build CMF Phone 1 Kernel + DTB (Aggressive LLVM ThinLTO)
 
 on:
   workflow_dispatch:
@@ -18,62 +18,43 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          bc bison build-essential cpio curl flex git \
-          libssl-dev libncurses5-dev zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar ccache
-
-    - name: Restore ccache
-      uses: actions/cache@v3
-      with:
-        path: .ccache
-        key: ${{ runner.os }}-cmf-kernel-${{ hashFiles('**/arch/arm64/configs/gki_defconfig') }}
-        restore-keys: |
-          ${{ runner.os }}-cmf-kernel-
+          bc bison build-essential cpio curl flex git libssl-dev \
+          libncurses5-dev zlib1g-dev libelf-dev dwarves \
+          wget unzip xz-utils tar clang lld llvm binutils
 
     - name: Setup LLVM toolchain
       run: |
         export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
-        export CC=clang
-        export LD=ld.lld
-        export USE_CCACHE=1
-        export CCACHE_DIR=$GITHUB_WORKSPACE/.ccache
         export ARCH=arm64
         export SUBARCH=arm64
+        export CC=clang
+        export LLVM=1
+        export LLVM_IAS=1
+        export CLANG_EXTRA="-flto=thin -fuse-ld=lld -Wl,--thinlto-cache-dir=$GITHUB_WORKSPACE/.lto-cache"
+        export USE_CCACHE=0
         echo "PATH=$PATH" >> $GITHUB_ENV
-        echo "CC=$CC" >> $GITHUB_ENV
-        echo "LD=$LD" >> $GITHUB_ENV
-        echo "USE_CCACHE=$USE_CCACHE" >> $GITHUB_ENV
-        echo "CCACHE_DIR=$CCACHE_DIR" >> $GITHUB_ENV
-        echo "ARCH=$ARCH" >> $GITHUB_ENV
-        echo "SUBARCH=$SUBARCH" >> $GITHUB_ENV
+        echo "ARCH=arm64" >> $GITHUB_ENV
+        echo "SUBARCH=arm64" >> $GITHUB_ENV
+        echo "CC=clang" >> $GITHUB_ENV
+        echo "LLVM=1" >> $GITHUB_ENV
+        echo "LLVM_IAS=1" >> $GITHUB_ENV
+        echo "CLANG_EXTRA=$CLANG_EXTRA" >> $GITHUB_ENV
+        echo "USE_CCACHE=0" >> $GITHUB_ENV
 
-    - name: Verify LLVM toolchain
-      run: |
-        clang --version
-        ld.lld --version
-
-    - name: Build Kernel + DTB (ThinLTO)
+    - name: Build Kernel + DTB (Aggressive ThinLTO)
       run: |
         make O=out gki_defconfig
-        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 \
-             LTO=thin \
-             LLD=1 \
-             LD=ld.lld
-        make O=out dtbs -j$(nproc) CC=clang LLVM=1 LLVM_IAS=1 \
-             LTO=thin LD=ld.lld
+        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 $CLANG_EXTRA
+        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1 $CLANG_EXTRA
 
     - name: Prepare AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-        # Copy kernel image
         cp out/arch/arm64/boot/Image AnyKernel3/Image
-        # Copy DTB files (all vendor dtbs)
         cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ || true
-        # Optional: copy dtbo.img if exists
         if [ -f out/arch/arm64/boot/dtbo.img ]; then
           cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
         fi
-        # Copy kernel config for reference/debug
         cp out/.config AnyKernel3/.config || true
 
     - name: Pack AnyKernel3 ZIP
