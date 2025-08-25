@@ -11,15 +11,18 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
+      # 1️⃣ Checkout workflow repo (optional)
       - name: Checkout Workflow Repository
         uses: actions/checkout@v4
 
+      # 2️⃣ Install dependencies
       - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y git wget curl zip unzip bc bison flex build-essential \
-            libncurses5-dev libssl-dev ccache python3 python3-pip openjdk-17-repo
+            libncurses5-dev libssl-dev ccache python3 python3-pip openjdk-17-jdk
 
+      # 3️⃣ Install repo tool
       - name: Install repo tool
         run: |
           mkdir -p ~/bin
@@ -27,6 +30,14 @@ jobs:
           chmod a+x ~/bin/repo
           echo "export PATH=$HOME/bin:$PATH" >> $GITHUB_ENV
 
+      # 4️⃣ Restore ccache cache
+      - name: Restore ccache
+        uses: actions/cache@v3
+        with:
+          path: .ccache
+          key: ${{ runner.os }}-ccache-${{ hashFiles('**/*.mk') }}
+
+      # 5️⃣ Initialize Infinity-X source
       - name: Initialize Infinity-X source
         run: |
           mkdir -p infinity_source
@@ -34,6 +45,7 @@ jobs:
           repo init -u https://github.com/ProjectInfinity-X/manifest -b 16 --git-lfs --no-repo-verify
           repo sync -c --no-tags --depth=1
 
+      # 6️⃣ Clone device, kernel, and vendor trees
       - name: Clone device trees
         run: |
           cd infinity_source
@@ -41,22 +53,33 @@ jobs:
           git clone --depth=1 -b lineage-22.2 https://github.com/abdulla-lin/android_device_nothing_tetris-kernel kernel/nothing/tetris
           git clone --depth=1 -b a15 https://gitlab.com/achugaming512/android_vendor_nothing_tetris vendor/nothing/tetris
 
+      # 7️⃣ Setup build environment
       - name: Setup environment
         run: |
           cd infinity_source
           source build/envsetup.sh
           lunch infinity_tetris-userdebug
 
+      # 8️⃣ Copy prebuilt kernel (optional)
       - name: Copy prebuilt kernel
         run: |
           cd infinity_source
           cp -r kernel/nothing/tetris/prebuilt/* out/target/product/tetris/ || true
 
+      # 9️⃣ Build ROM
       - name: Build ROM
         run: |
           cd infinity_source
           make -j$(nproc) bacon
 
+      # 🔟 Save ccache for next build
+      - name: Save ccache
+        uses: actions/cache@v3
+        with:
+          path: .ccache
+          key: ${{ runner.os }}-ccache-${{ hashFiles('**/*.mk') }}
+
+      # 1️⃣1️⃣ Upload ROM artifact
       - name: Upload ROM artifact
         uses: actions/upload-artifact@v4
         with:
