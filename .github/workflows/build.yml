@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang + GNU)
+name: Build CMF Phone 1 Kernel (Stock Clang 17.0.2 + GCC 4.9)
 
 on:
   workflow_dispatch:
@@ -21,33 +21,31 @@ jobs:
           bc bison build-essential cpio curl flex gcc g++ \
           git libssl-dev libncurses5-dev \
           zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar zstd \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          wget unzip xz-utils tar
 
-    - name: Download Prebuilt Neutron Clang
+    - name: Setup stock toolchain (Clang 17.0.2 + GCC 4.9)
       run: |
-        mkdir -p $HOME/antman
-        wget https://github.com/Neutron-Toolchains/antman/releases/download/10032024/neutron-clang-10032024.tar.xz -O $HOME/antman.tar.xz
-        tar -xf $HOME/antman.tar.xz -C $HOME/antman
-        export PATH=$HOME/antman/bin:$PATH
+        export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
+        export CROSS_COMPILE=$GITHUB_WORKSPACE/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-
+        export CROSS_COMPILE_COMPAT=$GITHUB_WORKSPACE/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+        export ARCH=arm64
+        export SUBARCH=arm64
 
     - name: Build Kernel
       run: |
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CC=clang
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-        export PATH=$HOME/antman/bin:$PATH
         make O=out defconfig
         make -j$(nproc) O=out
 
     - name: Prepare AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-        # Copy compiled kernel and dtbo
+        # Copy kernel image
         cp out/arch/arm64/boot/Image AnyKernel3/Image
-        cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img || true
+        # Copy dtbo if exists
+        if [ -f out/arch/arm64/boot/dtbo.img ]; then
+          cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+        fi
+        # Copy kernel config for reference/debug
         cp out/.config AnyKernel3/.config || true
 
     - name: Pack AnyKernel3 ZIP
@@ -55,7 +53,7 @@ jobs:
         cd AnyKernel3
         zip -r9 ../CMF_Kernel-6.1.68.zip *
 
-    - name: Upload AnyKernel zip
+    - name: Upload AnyKernel3 ZIP
       uses: actions/upload-artifact@v4
       with:
         name: CMF_Kernel-6.1.68
