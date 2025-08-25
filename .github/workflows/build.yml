@@ -43,7 +43,7 @@ jobs:
           mkdir -p infinity_source
           cd infinity_source
           repo init -u https://github.com/ProjectInfinity-X/manifest -b 16 --git-lfs --no-repo-verify
-          repo sync -c --no-tags --depth=1
+          repo sync -c --no-tags
 
       # 6️⃣ Clone device, kernel, and vendor trees
       - name: Clone device trees
