@@ -39,11 +39,28 @@ jobs:
         echo "LLVM_IAS=1" >> $GITHUB_ENV
         echo "USE_CCACHE=0" >> $GITHUB_ENV
 
-    - name: Build Kernel + DTB
+    - name: Configure Kernel (ThinLTO)
       run: |
         make O=out gki_defconfig
-        # Set local version for About Phone
-        sed -i 's/^CONFIG_LOCALVERSION=".*"/CONFIG_LOCALVERSION="-COMBACT-thinlto"/' out/.config || true
+
+        # Force ThinLTO settings
+        ./scripts/config --file out/.config \
+          -e LTO_CLANG_THIN \
+          -e THINLTO \
+          -d LTO_NONE \
+          -d LTO_CLANG_FULL
+
+        # Branding for About Phone
+        ./scripts/config --file out/.config \
+          -d LOCALVERSION \
+          -e LOCALVERSION_AUTO
+        echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto"' >> out/.config
+
+        # Apply changes
+        make O=out olddefconfig
+
+    - name: Build Kernel + DTB
+      run: |
         make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1
         make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1
 
