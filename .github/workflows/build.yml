@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SuKisu)
+name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SuKisu Built-in)
 
 on:
   workflow_dispatch:
@@ -22,17 +22,21 @@ jobs:
           libncurses5-dev zlib1g-dev libelf-dev dwarves \
           wget unzip xz-utils tar clang lld llvm binutils
 
-    - name: Clone KernelSU + SuSFS
+    - name: Clone SuKisu (KernelSU fork) + SuSFS
       run: |
         git clone https://github.com/abdulla-lin/KernelSU.git kernelSU
         git clone https://github.com/abdulla-lin/susfs4ksu-module.git susfs
 
-    - name: Patch Kernel with KernelSU
-      run: |
-        cd kernelSU
-        chmod +x setup.sh
-        ./setup.sh -t $GITHUB_WORKSPACE
-        cd ..
+        # Copy SuSFS into kernel source
+        mkdir -p drivers/susfs
+        cp -r susfs/* drivers/susfs/
+
+        # Register SuSFS in kernel build system
+        echo "obj-y += susfs/" >> drivers/Makefile
+        echo 'source "drivers/susfs/Kconfig"' >> drivers/Kconfig
+
+        # Copy KernelSU core files (adjust if needed)
+        cp -r kernelSU/* .
 
     - name: Setup LLVM toolchain
       run: |
@@ -58,6 +62,9 @@ jobs:
         # Enable ThinLTO
         scripts/config --file out/.config -e LTO -e LTO_CLANG -e THINLTO
         scripts/config --file out/.config -d LTO_NONE -d LTO_GCC -d LTO_FULL
+
+        # Enable SuKisu + SuSFS as built-in
+        scripts/config --file out/.config -e CONFIG_SUKISU -e CONFIG_SUSFS
 
         # Set custom About Phone string
         sed -i 's/^CONFIG_LOCALVERSION=".*"/CONFIG_LOCALVERSION="-COMBACT-thinlto+SuKisu-v1.5.2"/' out/.config || true
