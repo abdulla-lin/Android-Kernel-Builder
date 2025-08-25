@@ -1,61 +1,54 @@
-name: Build CMF Phone 1 Kernel (Neutron Clang + GNU)
+name: Build Nothing Tetris ROM
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    env:
+      USE_CCACHE: 1
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
-    - name: Checkout kernel source
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: main
+      - name: Checkout ROM source
+        uses: actions/checkout@v4
+        with:
+          repository: username/custom_rom_repo   # Replace with your ROM repo
+          ref: main
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          bc bison build-essential cpio curl flex gcc g++ \
-          git libssl-dev libncurses5-dev \
-          zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar zstd \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git wget curl zip unzip bc bison flex build-essential \
+            libncurses5-dev libssl-dev ccache python3 python3-pip openjdk-17-repo
 
-    - name: Download Neutron Clang (AntMan)
-      run: |
-        git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman
-        $HOME/antman/antman -S=10032024
+      - name: Setup repo
+        run: |
+          repo init -u https://android.googlesource.com/platform/manifest -b android14
+          repo sync -c --no-tags --depth=1
 
-    - name: Build Kernel
-      run: |
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CC=clang
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-        export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH:$PATH
-        make O=out cmf_defconfig
-        make -j$(nproc) O=out
+      - name: Clone device trees
+        run: |
+          git clone --depth=1 https://github.com/SuperAviation001/android_device_nothing_tetris device/nothing/tetris
+          git clone --depth=1 https://github.com/SuperAviation001/android_device_nothing_tetris-kernel kernel/nothing/tetris
+          git clone --depth=1 https://gitlab.com/SuperAviation001/android_vendor_nothing_tetris vendor/nothing/tetris
 
-    - name: Prepare AnyKernel3
-      run: |
-        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-        cp kernel/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
-        cp kernel/out/.config AnyKernel3/.config || true
-        # Do not include DTB or modules
-        cd AnyKernel3
-        rm -f *.dtb *.dtbo
+      - name: Setup environment
+        run: |
+          source build/envsetup.sh
+          lunch aosp_tetris-userdebug
 
-    - name: Pack AnyKernel3 ZIP
-      run: |
-        cd AnyKernel3
-        zip -r9 ../CMF_Kernel-6.1.68.zip *
+      - name: Copy prebuilt kernel
+        run: |
+          cp -r kernel/nothing/tetris/prebuilt/* out/target/product/tetris/
 
-    - name: Upload AnyKernel zip
-      uses: actions/upload-artifact@v4
-      with:
-        name: CMF_Kernel-6.1.68
-        path: CMF_Kernel-6.1.68.zip
+      - name: Build ROM
+        run: |
+          make -j$(nproc) bacon
+
+      - name: Upload built ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nothing-Tetris-ROM
+          path: out/target/product/tetris/*.zip
