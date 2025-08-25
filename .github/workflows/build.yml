@@ -21,7 +21,8 @@ jobs:
           bc bison build-essential cpio curl flex gcc g++ \
           git libssl-dev libncurses5-dev \
           zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar ccache
+          wget unzip xz-utils tar ccache \
+          clang lld llvm
 
     - name: Restore ccache
       uses: actions/cache@v3
@@ -33,7 +34,7 @@ jobs:
 
     - name: Setup LLVM toolchain
       run: |
-        export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
+        export PATH=/usr/lib/llvm-17/bin:$PATH
         export USE_CCACHE=1
         export CCACHE_DIR=$GITHUB_WORKSPACE/.ccache
         export ARCH=arm64
@@ -48,7 +49,7 @@ jobs:
 
     - name: Build Kernel + DTB
       run: |
-        make O=out defconfig
+        make O=out gki_defconfig
         make -j$(nproc) O=out \
           CC=clang LLVM=1 LLVM_IAS=1
         make O=out dtbs -j$(nproc) \
