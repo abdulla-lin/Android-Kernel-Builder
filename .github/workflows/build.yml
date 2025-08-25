@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + DTB (LLVM Fixed)
+name: Build CMF Phone 1 Kernel (LLVM Fast)
 
 on:
   workflow_dispatch:
@@ -39,17 +39,16 @@ jobs:
         echo "LLVM_IAS=1" >> $GITHUB_ENV
         echo "USE_CCACHE=0" >> $GITHUB_ENV
 
-    - name: Build Kernel + DTB
+    - name: Build Kernel only
       run: |
         make O=out gki_defconfig
         make -j4 O=out CC=clang LLVM=1 LLVM_IAS=1
-        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1
 
     - name: Prepare AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
         cp out/arch/arm64/boot/Image AnyKernel3/Image
-        cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ || true
+        # Optional: copy dtbo.img if exists
         if [ -f out/arch/arm64/boot/dtbo.img ]; then
           cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
         fi
