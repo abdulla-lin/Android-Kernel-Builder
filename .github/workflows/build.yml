@@ -50,7 +50,7 @@ jobs:
 
     - name: Build Kernel + DTB
       run: |
-        make O=out gki_defconfig
+        make O=out defconfig
         make -j$(nproc) O=out
         make O=out dtbs -j$(nproc)
 
