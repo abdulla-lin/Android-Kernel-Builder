@@ -1,4 +1,4 @@
-name: Build Nothing Tetris ROM
+name: Build LineageOS 22.2 for Nothing Tetris
 
 on:
   workflow_dispatch:
@@ -11,44 +11,45 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
-      - name: Checkout ROM source
-        uses: actions/checkout@v4
-        with:
-          repository: username/custom_rom_repo   # Replace with your ROM repo
-          ref: main
+      # 1️⃣ Checkout LineageOS manifest
+      - name: Checkout LineageOS manifest
+        run: |
+          repo init -u https://github.com/LineageOS/android.git -b lineage-22.2 --git-lfs --no-clone-bundle
+          repo sync -c --no-tags --depth=1
 
+      # 2️⃣ Install dependencies
       - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y git wget curl zip unzip bc bison flex build-essential \
             libncurses5-dev libssl-dev ccache python3 python3-pip openjdk-17-repo
 
-      - name: Setup repo
-        run: |
-          repo init -u https://android.googlesource.com/platform/manifest -b android14
-          repo sync -c --no-tags --depth=1
-
+      # 3️⃣ Clone device trees
       - name: Clone device trees
         run: |
-          git clone --depth=1 https://github.com/SuperAviation001/android_device_nothing_tetris device/nothing/tetris
-          git clone --depth=1 https://github.com/SuperAviation001/android_device_nothing_tetris-kernel kernel/nothing/tetris
-          git clone --depth=1 https://gitlab.com/SuperAviation001/android_vendor_nothing_tetris vendor/nothing/tetris
+          git clone --depth=1 -b infinity-16 https://github.com/abdulla-lin/android_device_nothing_tetris device/nothing/tetris
+          git clone --depth=1 -b lineage-22.2 https://github.com/abdulla-lin/android_device_nothing_tetris-kernel kernel/nothing/tetris
+          git clone --depth=1 -b a15 https://gitlab.com/achugaming512/android_vendor_nothing_tetris vendor/nothing/tetris
 
+      # 4️⃣ Setup environment
       - name: Setup environment
         run: |
           source build/envsetup.sh
-          lunch aosp_tetris-userdebug
+          lunch lineage_tetris-userdebug
 
+      # 5️⃣ Copy prebuilt kernel (optional)
       - name: Copy prebuilt kernel
         run: |
-          cp -r kernel/nothing/tetris/prebuilt/* out/target/product/tetris/
+          cp -r kernel/nothing/tetris/prebuilt/* out/target/product/tetris/ || true
 
+      # 6️⃣ Build ROM
       - name: Build ROM
         run: |
-          make -j$(nproc) bacon
+          mka bacon -j$(nproc)
 
+      # 7️⃣ Upload built ROM as artifact
       - name: Upload built ROM
         uses: actions/upload-artifact@v4
         with:
-          name: Nothing-Tetris-ROM
+          name: LineageOS-22.2-Tetris
           path: out/target/product/tetris/*.zip
