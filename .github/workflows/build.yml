@@ -48,7 +48,7 @@ jobs:
 
     - name: Build Kernel + DTB
       run: |
-        make O=out gki_defconfig
+        make O=out defconfig
         make -j$(nproc) O=out \
           CC=clang LLVM=1 LLVM_IAS=1
         make O=out dtbs -j$(nproc) \
