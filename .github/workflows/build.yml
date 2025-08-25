@@ -22,24 +22,15 @@ jobs:
           libncurses5-dev zlib1g-dev libelf-dev dwarves \
           wget unzip xz-utils tar clang lld llvm binutils
 
-    - name: Clone SuKisu + SuSFS
+    - name: Clone SuKisu patches
       run: |
         git clone https://github.com/abdulla-lin/KernelSU.git kernelSU
+        # Apply SuKisu patches if needed (depends on repo structure)
+        # e.g., cp kernelSU/patches/* . && git apply *.patch
+
+    - name: Clone SuSFS as external module
+      run: |
         git clone https://github.com/abdulla-lin/susfs4ksu-module.git susfs
-
-        # Copy SuSFS into kernel as a core driver
-        mkdir -p drivers/susfs
-        cp -r susfs/* drivers/susfs/
-
-        # Create minimal Makefile and Kconfig for SuSFS
-        echo 'obj-$(CONFIG_SUSFS) += susfs.o' > drivers/susfs/Makefile
-        echo 'config SUSFS\n\ttristate "SuSFS filesystem support"\n\thelp\n\t  SuSFS is required for KernelSU.' > drivers/susfs/Kconfig
-
-        # Link SuSFS Kconfig in main drivers/Kconfig
-        grep -qxF 'source "drivers/susfs/Kconfig"' drivers/Kconfig || echo 'source "drivers/susfs/Kconfig"' >> drivers/Kconfig
-
-        # Copy KernelSU into kernel
-        cp -r kernelSU/* .
 
     - name: Setup LLVM toolchain
       run: |
@@ -66,15 +57,17 @@ jobs:
         scripts/config --file out/.config -e LTO -e LTO_CLANG -e THINLTO
         scripts/config --file out/.config -d LTO_NONE -d LTO_GCC -d LTO_FULL
 
-        # Enable SuKisu + SuSFS
-        scripts/config --file out/.config -e CONFIG_SUKISU -e CONFIG_SUSFS
-
-        # Set custom About Phone string
+        # Set About Phone string
         sed -i 's/^CONFIG_LOCALVERSION=".*"/CONFIG_LOCALVERSION="-COMBACT-thinlto+SuKisu-v1.5.2"/' out/.config || true
 
         make olddefconfig O=out
         make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1
         make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1
+
+    - name: Build SuSFS external module
+      run: |
+        cd susfs
+        make -C $GITHUB_WORKSPACE/out M=$PWD CC=clang LLVM=1 LLVM_IAS=1
 
     - name: Prepare AnyKernel3
       run: |
@@ -85,6 +78,9 @@ jobs:
           cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
         fi
         cp out/.config AnyKernel3/.config || true
+        # Optional: include compiled SuSFS module in ZIP
+        mkdir -p AnyKernel3/modules
+        cp susfs/*.ko AnyKernel3/modules/ || true
 
     - name: Pack AnyKernel3 ZIP
       run: |
