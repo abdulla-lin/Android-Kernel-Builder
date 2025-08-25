@@ -24,10 +24,12 @@ jobs:
           wget unzip xz-utils tar zstd \
           gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-    - name: Download Neutron Clang (AntMan)
+    - name: Download Prebuilt Neutron Clang
       run: |
-        git clone --depth=1 https://github.com/Neutron-Toolchains/antman $HOME/antman
-        $HOME/antman/antman -S=10032024
+        mkdir -p $HOME/antman
+        wget https://github.com/Neutron-Toolchains/antman/releases/download/10032024/neutron-clang-10032024.tar.xz -O $HOME/antman.tar.xz
+        tar -xf $HOME/antman.tar.xz -C $HOME/antman
+        export PATH=$HOME/antman/bin:$PATH
 
     - name: Build Kernel
       run: |
@@ -36,19 +38,17 @@ jobs:
         export CC=clang
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-        export PATH=$HOME/antman/toolchains/neutron-clang/bin:$PATH
+        export PATH=$HOME/antman/bin:$PATH
         make O=out defconfig
         make -j$(nproc) O=out
 
     - name: Prepare AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-        # Copy the correct kernel image
+        # Copy compiled kernel and dtbo
         cp out/arch/arm64/boot/Image AnyKernel3/Image
+        cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img || true
         cp out/.config AnyKernel3/.config || true
-        # Remove DTBs if not needed
-        cd AnyKernel3
-        rm -f *.dtb *.dtbo
 
     - name: Pack AnyKernel3 ZIP
       run: |
