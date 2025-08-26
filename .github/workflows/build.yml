@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SUSFS + KernelSU)
+name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SUSFS + KernelSU + Boosters)
 
 on:
   workflow_dispatch:
@@ -67,7 +67,7 @@ jobs:
 
     - name: Configure Kernel (ThinLTO + SUSFS + KernelSU + Boosters)
       run: |
-        set -e
+        set -euo pipefail
         make O=out gki_defconfig
 
         # Enable ThinLTO
@@ -131,7 +131,8 @@ EOF
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
         cp out/arch/arm64/boot/Image AnyKernel3/Image || true
-        cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ || true
+        # Use find instead of ** wildcard
+        find out/arch/arm64/boot/dts/ -name '*.dtb' -exec cp {} AnyKernel3/ \;
         if [ -f out/arch/arm64/boot/dtbo.img ]; then
           cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
         fi
