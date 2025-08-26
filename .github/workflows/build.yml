@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SUSFS + KernelSU + Boosters)
+name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SUSFS + KernelSU)
 
 on:
   workflow_dispatch:
@@ -41,7 +41,7 @@ jobs:
 
     - name: Add SUSFS to kernel tree
       run: |
-        git clone --depth=1 https://github.com/abdulla-lin/susfs4ksu-module.git susfs_temp
+        git clone --depth=1 https://gitlab.com/achugaming512/susfs4ksu.git susfs_temp
         mkdir -p drivers/misc/susfs
         cp -r susfs_temp/* drivers/misc/susfs/
         rm -rf susfs_temp
@@ -65,9 +65,8 @@ jobs:
             help
               KernelSU root support.' > drivers/misc/kernelsu/Kconfig
 
-    - name: Configure Kernel (ThinLTO + SUSFS + KernelSU + Boosters)
+    - name: Configure Kernel (ThinLTO + SUSFS + KernelSU)
       run: |
-        set -euo pipefail
         make O=out gki_defconfig
 
         # Enable ThinLTO
@@ -86,40 +85,6 @@ jobs:
         ./scripts/config --file out/.config -e LOCALVERSION_AUTO
         echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto"' >> out/.config
 
-        # --- BOOSTERS INJECTION ---
-        while read -r line; do
-          key=$(echo "$line" | cut -d= -f1)
-          if grep -q "^$key=" out/.config; then
-            sed -i "s|^$key=.*|$line|" out/.config
-          else
-            echo "$line" >> out/.config
-          fi
-        done <<'EOF'
-CONFIG_SCHED_CORE=y
-CONFIG_HMP_BOOST=y
-CONFIG_PREEMPT_VOLUNTARY=y
-CONFIG_SCHED_MC=y
-CONFIG_NO_HZ_FULL=y
-CONFIG_CFS_BANDWIDTH=y
-CONFIG_SMP=y
-CONFIG_CPU_FREQ=y
-CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
-CONFIG_MTK_CPU_FREQ_LIMIT=y
-CONFIG_HIGHMEM4G=y
-CONFIG_HOTPLUG_CPU=y
-CONFIG_MEMCG=y
-CONFIG_BLK_CGROUP=y
-CONFIG_MTK_IO_BOOST=y
-CONFIG_IO_URING=y
-CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
-CONFIG_LTO_CLANG=y
-CONFIG_GCC_PLUGIN_LTO=y
-CONFIG_CC_HAS_SANE_BUILTIN=y
-CONFIG_MTK_GPU_BOOST=y
-CONFIG_HZ_1000=y
-CONFIG_SCHED_WALT=y
-EOF
-
         make O=out olddefconfig
 
     - name: Build Kernel + DTB
@@ -131,8 +96,7 @@ EOF
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
         cp out/arch/arm64/boot/Image AnyKernel3/Image || true
-        # Use find instead of ** wildcard
-        find out/arch/arm64/boot/dts/ -name '*.dtb' -exec cp {} AnyKernel3/ \;
+        cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ || true
         if [ -f out/arch/arm64/boot/dtbo.img ]; then
           cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
         fi
