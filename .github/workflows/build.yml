@@ -67,23 +67,27 @@ jobs:
 
     - name: Configure Kernel (ThinLTO + SUSFS + KernelSU + Boosters)
       run: |
+        set -e
         make O=out gki_defconfig
+
         # Enable ThinLTO
         ./scripts/config --file out/.config \
           -e LTO_CLANG_THIN \
           -e THINLTO \
           -d LTO_NONE \
           -d LTO_CLANG_FULL
+
         # Enable SUSFS & KernelSU
         ./scripts/config --file out/.config -e SUSFS
         ./scripts/config --file out/.config -e KERNELSU
+
         # Set local version
         ./scripts/config --file out/.config -d LOCALVERSION
         ./scripts/config --file out/.config -e LOCALVERSION_AUTO
         echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto"' >> out/.config
 
         # --- BOOSTERS INJECTION ---
-        cat <<'EOF' > boosters.txt
+        BOOSTERS=$(cat <<'EOF'
 CONFIG_SCHED_CORE=y
 CONFIG_HMP_BOOST=y
 CONFIG_PREEMPT_VOLUNTARY=y
@@ -108,17 +112,16 @@ CONFIG_MTK_GPU_BOOST=y
 CONFIG_HZ_1000=y
 CONFIG_SCHED_WALT=y
 EOF
+)
 
-        while read line; do
-          [[ "$line" =~ ^#.*$ ]] && continue
-          [[ -z "$line" ]] && continue
+        for line in $BOOSTERS; do
           key=$(echo $line | cut -d= -f1)
           if grep -q "^$key=" out/.config; then
             sed -i "s|^$key=.*|$line|" out/.config
           else
             echo "$line" >> out/.config
           fi
-        done < boosters.txt
+        done
 
         make O=out olddefconfig
 
