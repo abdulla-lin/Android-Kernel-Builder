@@ -87,7 +87,14 @@ jobs:
         echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto"' >> out/.config
 
         # --- BOOSTERS INJECTION ---
-        BOOSTERS=$(cat <<'EOF'
+        while read -r line; do
+          key=$(echo "$line" | cut -d= -f1)
+          if grep -q "^$key=" out/.config; then
+            sed -i "s|^$key=.*|$line|" out/.config
+          else
+            echo "$line" >> out/.config
+          fi
+        done <<'EOF'
 CONFIG_SCHED_CORE=y
 CONFIG_HMP_BOOST=y
 CONFIG_PREEMPT_VOLUNTARY=y
@@ -112,16 +119,6 @@ CONFIG_MTK_GPU_BOOST=y
 CONFIG_HZ_1000=y
 CONFIG_SCHED_WALT=y
 EOF
-)
-
-        for line in $BOOSTERS; do
-          key=$(echo $line | cut -d= -f1)
-          if grep -q "^$key=" out/.config; then
-            sed -i "s|^$key=.*|$line|" out/.config
-          else
-            echo "$line" >> out/.config
-          fi
-        done
 
         make O=out olddefconfig
 
