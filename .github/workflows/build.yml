@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + susfs)
+name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SUSFS + KernelSU)
 
 on:
   workflow_dispatch:
@@ -39,35 +39,63 @@ jobs:
         echo "LLVM_IAS=1" >> $GITHUB_ENV
         echo "USE_CCACHE=0" >> $GITHUB_ENV
 
-    - name: Add susfs to kernel tree
+    - name: Add SUSFS to kernel tree
       run: |
         git clone --depth=1 https://github.com/abdulla-lin/susfs4ksu-module.git susfs_temp
         mkdir -p drivers/misc/susfs
         cp -r susfs_temp/* drivers/misc/susfs/
         rm -rf susfs_temp
-        # Create Kconfig and Makefile if not present
-        echo 'config SUSFS\n\ttristate "Susfs support"\n\tdefault y\n\thelp\n\tSusfs file system support.' > drivers/misc/susfs/Kconfig
-        echo 'obj-$(CONFIG_SUSFS) += susfs.o' > drivers/misc/susfs/Makefile
 
-    - name: Configure Kernel (ThinLTO + susfs)
+        # Makefile & Kconfig for kernel integration
+        echo 'obj-$(CONFIG_SUSFS) += susfs.o' > drivers/misc/susfs/Makefile
+        echo 'config SUSFS
+            tristate "Susfs support"
+            default y
+            help
+              Susfs file system support.' > drivers/misc/susfs/Kconfig
+
+    - name: Clone KernelSU module
+      run: |
+        git clone --depth=1 https://github.com/abdulla-lin/KernelSU.git kernelsu_temp
+        mkdir -p drivers/misc/kernelsu
+        cp -r kernelsu_temp/* drivers/misc/kernelsu/
+        rm -rf kernelsu_temp
+
+        # Makefile & Kconfig for KernelSU
+        echo 'obj-$(CONFIG_KERNELSU) += kernelsu.o' > drivers/misc/kernelsu/Makefile
+        echo 'config KERNELSU
+            tristate "KernelSU support"
+            default y
+            help
+              KernelSU root support.' > drivers/misc/kernelsu/Kconfig
+
+    - name: Configure Kernel (ThinLTO + SUSFS + KernelSU)
       run: |
         make O=out gki_defconfig
+
+        # Enable ThinLTO
         ./scripts/config --file out/.config \
           -e LTO_CLANG_THIN \
           -e THINLTO \
           -d LTO_NONE \
           -d LTO_CLANG_FULL
-        ./scripts/config --file out/.config \
-          -d LOCALVERSION \
-          -e LOCALVERSION_AUTO
-        echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto"' >> out/.config
+
+        # Enable SUSFS & KernelSU
         ./scripts/config --file out/.config -e SUSFS
+        ./scripts/config --file out/.config -e KERNELSU
+
+        # Set local version
+        ./scripts/config --file out/.config -d LOCALVERSION
+        ./scripts/config --file out/.config -e LOCALVERSION_AUTO
+        echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto"' >> out/.config
+
+        # Update config
         make O=out olddefconfig
 
     - name: Build Kernel + DTB
       run: |
-        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 || true
-        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1 || true
+        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1
+        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1
 
     - name: Prepare AnyKernel3
       run: |
@@ -82,10 +110,10 @@ jobs:
     - name: Pack AnyKernel3 ZIP
       run: |
         cd AnyKernel3
-        zip -r9 ../CMF_Kernel-6.1.68-COMBACT-thinlto-susfs.zip * || true
+        zip -r9 ../CMF_Kernel-6.1.68-COMBACT-thinlto-susfs-kernelsu.zip *
 
     - name: Upload AnyKernel3 ZIP
       uses: actions/upload-artifact@v4
       with:
-        name: CMF_Kernel-6.1.68-COMBACT-thinlto-susfs
-        path: CMF_Kernel-6.1.68-COMBACT-thinlto-susfs.zip
+        name: CMF_Kernel-6.1.68-COMBACT-thinlto-susfs-kernelsu
+        path: CMF_Kernel-6.1.68-COMBACT-thinlto-susfs-kernelsu.zip
