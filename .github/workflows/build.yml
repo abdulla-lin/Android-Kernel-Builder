@@ -41,10 +41,11 @@ jobs:
 
     - name: Add SUSFS to kernel tree
       run: |
-        git clone --depth=1 https://gitlab.com/achugaming512/susfs4ksu.git susfs_temp
+        git clone --depth=1 https://github.com/abdulla-lin/susfs4ksu-module.git susfs_temp
         mkdir -p drivers/misc/susfs
         cp -r susfs_temp/* drivers/misc/susfs/
         rm -rf susfs_temp
+        # Makefile & Kconfig for kernel integration
         echo 'obj-$(CONFIG_SUSFS) += susfs.o' > drivers/misc/susfs/Makefile
         echo 'config SUSFS
             tristate "Susfs support"
@@ -58,6 +59,7 @@ jobs:
         mkdir -p drivers/misc/kernelsu
         cp -r kernelsu_temp/* drivers/misc/kernelsu/
         rm -rf kernelsu_temp
+        # Makefile & Kconfig for KernelSU
         echo 'obj-$(CONFIG_KERNELSU) += kernelsu.o' > drivers/misc/kernelsu/Makefile
         echo 'config KERNELSU
             tristate "KernelSU support"
@@ -65,8 +67,9 @@ jobs:
             help
               KernelSU root support.' > drivers/misc/kernelsu/Kconfig
 
-    - name: Configure Kernel (ThinLTO + SUSFS + KernelSU)
+    - name: Configure Kernel (ThinLTO + SUSFS + KernelSU + GSI & GPU userspace)
       run: |
+        # create base defconfig (out/.config)
         make O=out gki_defconfig
 
         # Enable ThinLTO
@@ -80,11 +83,52 @@ jobs:
         ./scripts/config --file out/.config -e SUSFS
         ./scripts/config --file out/.config -e KERNELSU
 
-        # Set local version
+        # GSI & Android essentials (built-in where applicable)
+        ./scripts/config --file out/.config -e ANDROID_BINDER_IPC || ./scripts/config --file out/.config -e ANDROID_BINDER
+        ./scripts/config --file out/.config -e ANDROID_BINDERFS
+        ./scripts/config --file out/.config -e ANDROID_ASHMEM
+
+        # devtmpfs/sysfs/tmpfs
+        ./scripts/config --file out/.config -e DEVTMPFS
+        ./scripts/config --file out/.config -e DEVTMPFS_MOUNT
+        ./scripts/config --file out/.config -e SYSFS
+        ./scripts/config --file out/.config -e TMPFS
+        ./scripts/config --file out/.config -e DEVPTS
+
+        # namespaces & cgroups
+        ./scripts/config --file out/.config -e NAMESPACES
+        ./scripts/config --file out/.config -e USER_NS
+        ./scripts/config --file out/.config -e CGROUPS
+        ./scripts/config --file out/.config -e CGROUP_DEVICE
+        ./scripts/config --file out/.config -e CGROUP_PIDS
+
+        # filesystems and image helpers
+        ./scripts/config --file out/.config -e EXT4_FS
+        ./scripts/config --file out/.config -e F2FS_FS || true
+        ./scripts/config --file out/.config -e BLK_DEV_LOOP
+        ./scripts/config --file out/.config -e BLK_DEV_DM || true
+
+        # security & debug
+        ./scripts/config --file out/.config -e SECURITY_SELINUX
+        ./scripts/config --file out/.config -e AUDIT
+        ./scripts/config --file out/.config -e DEBUG_FS
+
+        # devfreq + userspace governor for GPU control
+        ./scripts/config --file out/.config -e DEVFREQ
+        ./scripts/config --file out/.config -e DEVFREQ_GOV_USERSPACE || true
+
+        # try enable Mali (if present) - harmless if symbol absent
+        ./scripts/config --file out/.config -e MALI || true
+
+        # set binder device names expected by Android userspace
+        ./scripts/config --file out/.config --set-str ANDROID_BINDER_DEVICES "binder,hwbinder,vndbinder" || true
+
+        # preserve your localversion settings
         ./scripts/config --file out/.config -d LOCALVERSION
         ./scripts/config --file out/.config -e LOCALVERSION_AUTO
         echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto"' >> out/.config
 
+        # update config
         make O=out olddefconfig
 
     - name: Build Kernel + DTB
