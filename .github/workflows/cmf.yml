@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel + DTB (COMBACT Thin-LTO + SUSFS + KernelSU + Boosters)
+name: Build CMF Phone 1 Kernel + DTB (COMBACT ThinLTO + O3)
 
 on:
   workflow_dispatch:
@@ -6,6 +6,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ARCH: arm64
+      SUBARCH: arm64
 
     steps:
     - name: Checkout kernel source
@@ -24,115 +27,95 @@ jobs:
 
     - name: Setup LLVM toolchain
       run: |
+        # adjust path to your prebuilts clang if included in repo; otherwise system clang used
         export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
         export CC=clang
         export LLVM=1
         export LLVM_IAS=1
-        export USE_CCACHE=0
         echo "PATH=$PATH" >> $GITHUB_ENV
         echo "ARCH=arm64" >> $GITHUB_ENV
         echo "SUBARCH=arm64" >> $GITHUB_ENV
         echo "CC=clang" >> $GITHUB_ENV
         echo "LLVM=1" >> $GITHUB_ENV
         echo "LLVM_IAS=1" >> $GITHUB_ENV
-        echo "USE_CCACHE=0" >> $GITHUB_ENV
 
-    - name: Add SUSFS to kernel tree
+    - name: Configure Kernel (GKI + ThinLTO + O3 + Safe Tweaks)
       run: |
-        git clone --depth=1 https://github.com/abdulla-lin/susfs4ksu-module.git susfs_temp
-        mkdir -p drivers/misc/susfs
-        cp -r susfs_temp/* drivers/misc/susfs/
-        rm -rf susfs_temp
-        echo 'obj-$(CONFIG_SUSFS) += susfs.o' > drivers/misc/susfs/Makefile
-        echo 'config SUSFS
-            tristate "Susfs support"
-            default y
-            help
-              Susfs file system support.' > drivers/misc/susfs/Kconfig
+        set -e
 
-    - name: Clone KernelSU module
-      run: |
-        git clone --depth=1 https://github.com/abdulla-lin/KernelSU.git kernelsu_temp
-        mkdir -p drivers/misc/kernelsu
-        cp -r kernelsu_temp/* drivers/misc/kernelsu/
-        rm -rf kernelsu_temp
-        echo 'obj-$(CONFIG_KERNELSU) += kernelsu.o' > drivers/misc/kernelsu/Makefile
-        echo 'config KERNELSU
-            tristate "KernelSU support"
-            default y
-            help
-              KernelSU root support.' > drivers/misc/kernelsu/Kconfig
-
-    - name: Configure Kernel (ThinLTO + SUSFS + KernelSU + Boosters)
-      run: |
-        set -euo pipefail
+        # 1) Load base GKI config
         make O=out gki_defconfig
 
-        # Enable ThinLTO
+        # 2) Enable ThinLTO
         ./scripts/config --file out/.config \
-          -e LTO_CLANG_THIN \
-          -e THINLTO \
-          -d LTO_NONE \
-          -d LTO_CLANG_FULL
+          -e LTO_CLANG_THIN -e THINLTO \
+          -d LTO_NONE -d LTO_CLANG_FULL
 
-        # Enable SUSFS & KernelSU
-        ./scripts/config --file out/.config -e SUSFS
-        ./scripts/config --file out/.config -e KERNELSU
+        # 3) Switch O2 -> O3 (Kconfig option)
+        ./scripts/config --file out/.config \
+          -d CC_OPTIMIZE_FOR_PERFORMANCE \
+          -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
 
-        # Set local version
-        ./scripts/config --file out/.config -d LOCALVERSION
-        ./scripts/config --file out/.config -e LOCALVERSION_AUTO
-        echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto"' >> out/.config
+        # 4) Branding for About Phone
+        ./scripts/config --file out/.config -d LOCALVERSION -e LOCALVERSION_AUTO
+        # append LOCALVERSION string (will be picked up by olddefconfig)
+        echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto-O3"' >> out/.config
 
-        # --- BOOSTERS INJECTION ---
-        BOOSTERS=(
-          "CONFIG_SCHED_CORE=y"
-          "CONFIG_HMP_BOOST=y"
-          "CONFIG_PREEMPT_VOLUNTARY=y"
-          "CONFIG_SCHED_MC=y"
-          "CONFIG_NO_HZ_FULL=y"
-          "CONFIG_CFS_BANDWIDTH=y"
-          "CONFIG_SMP=y"
-          "CONFIG_CPU_FREQ=y"
-          "CONFIG_CPU_FREQ_GOV_PERFORMANCE=y"
-          "CONFIG_MTK_CPU_FREQ_LIMIT=y"
-          "CONFIG_HIGHMEM4G=y"
-          "CONFIG_HOTPLUG_CPU=y"
-          "CONFIG_MEMCG=y"
-          "CONFIG_BLK_CGROUP=y"
-          "CONFIG_MTK_IO_BOOST=y"
-          "CONFIG_IO_URING=y"
-          "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y"
-          "CONFIG_LTO_CLANG=y"
-          "CONFIG_GCC_PLUGIN_LTO=y"
-          "CONFIG_CC_HAS_SANE_BUILTIN=y"
-          "CONFIG_MTK_GPU_BOOST=y"
-          "CONFIG_HZ_1000=y"
-          "CONFIG_SCHED_WALT=y"
-        )
-        for line in "${BOOSTERS[@]}"; do
-          key=$(echo "$line" | cut -d= -f1)
-          if grep -q "^$key=" out/.config; then
-            sed -i "s|^$key=.*|$line|" out/.config
-          else
-            echo "$line" >> out/.config
-          fi
-        done
+        # 5) Scheduler / CPUfreq
+        ./scripts.config() { ./scripts/config --file out/.config "$@"; }
+        ./scripts/config --file out/.config -e CPU_FREQ_GOV_SCHEDUTIL -e CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+        ./scripts/config --file out/.config -e UCLAMP_TASK -e UCLAMP_TASK_GROUP -e SCHED_AUTOGROUP
 
+        # 6) Memory: zswap/zsmalloc/zram writeback + compression
+        ./scripts/config --file out/.config -e ZSWAP -e ZSMALLOC -e Z3FOLD -e ZRAM_WRITEBACK
+        ./scripts/config --file out/.config -e CRYPTO_LZ4 -e CRYPTO_ZSTD
+
+        # 7) Networking: BBR + fq_codel
+        ./scripts/config --file out/.config -e TCP_CONG_BBR -e NET_SCH_FQ_CODEL -e NET_SCH_FQ
+
+        # 8) Devfreq & thermal user-space hooks (lets userspace/gamespace tune devfreq)
+        ./scripts/config --file out/.config -e DEVFREQ_GOV_USERSPACE -e DEVFREQ_GOV_SIMPLE_ONDEMAND
+        ./scripts/config --file out/.config -e PM_DEVFREQ_EVENT -e THERMAL_GOV_USER_SPACE
+
+        # 9) I/O schedulers: BFQ + Kyber
+        ./scripts/config --file out/.config -e IOSCHED_BFQ -e IOSCHED_KYBER
+
+        # 10) finalize config
         make O=out olddefconfig
 
-    - name: Build Kernel + DTB
+    - name: Insert dmesg branding
+      run: |
+        # Add a small boot-time pr_info message into init/main.c (only if not already present)
+        if grep -q "Kernel Built with ThinLTO + O3 Optimization" init/main.c 2>/dev/null; then
+          echo "branding already present"
+        else
+          # Insert the pr_info line after the first occurrence of "Linux version" printk to show in dmesg early
+          awk '{
+            print
+          }
+          /Linux version/ && !inserted {
+            print "    pr_info(\"Kernel Built with ThinLTO + O3 Optimization\\n\");"
+            inserted=1
+          }' init/main.c > init/main.c.tmp && mv init/main.c.tmp init/main.c
+          git add init/main.c || true
+          echo "inserted branding into init/main.c"
+        fi
+
+    - name: Build Kernel + DTBs
       run: |
         make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1
         make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1
 
     - name: Prepare AnyKernel3
       run: |
+        rm -rf AnyKernel3 || true
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-        cp out/arch/arm64/boot/Image AnyKernel3/Image || true
-        find out/arch/arm64/boot/dts/ -name '*.dtb' -exec cp {} AnyKernel3/ \;
+        cp out/arch/arm64/boot/Image AnyKernel3/Image
+        # copy dtb files if available
+        shopt -s globstar || true
+        cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ 2>/dev/null || true
         if [ -f out/arch/arm64/boot/dtbo.img ]; then
           cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
         fi
@@ -141,10 +124,11 @@ jobs:
     - name: Pack AnyKernel3 ZIP
       run: |
         cd AnyKernel3
-        zip -r9 ../CMF_Kernel-6.1.68-COMBACT-thinlto-susfs-kernelsu.zip *
+        zip -r9 ../CMF_Kernel-6.1-COMBACT-thinlto-O3.zip *
 
     - name: Upload AnyKernel3 ZIP
       uses: actions/upload-artifact@v4
       with:
-        name: CMF_Kernel-6.1.68-COMBACT-thinlto-susfs-kernelsu
-        path: CMF_Kernel-6.1.68-COMBACT-thinlto-susfs-kernelsu.zip
+        name: CMF_Kernel-6.1-COMBACT-thinlto-O3
+        path: CMF_Kernel-6.1-COMBACT-thinlto-O3.zip
+        
