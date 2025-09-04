@@ -1,14 +1,11 @@
-name: Build CMF Phone 1 Kernel + DTB (COMBACT ThinLTO + O3)
+name: Build malidp_drv Module
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build_module:
     runs-on: ubuntu-latest
-    env:
-      ARCH: arm64
-      SUBARCH: arm64
 
     steps:
     - name: Checkout kernel source
@@ -27,7 +24,6 @@ jobs:
 
     - name: Setup LLVM toolchain
       run: |
-        # adjust path to your prebuilts clang if included in repo; otherwise system clang used
         export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
@@ -41,94 +37,28 @@ jobs:
         echo "LLVM=1" >> $GITHUB_ENV
         echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-    - name: Configure Kernel (GKI + ThinLTO + O3 + Safe Tweaks)
+    - name: Configure Kernel (minimal for modules)
       run: |
-        set -e
-
-        # 1) Load base GKI config
         make O=out gki_defconfig
-
-        # 2) Enable ThinLTO
-        ./scripts/config --file out/.config \
-          -e LTO_CLANG_THIN -e THINLTO \
-          -d LTO_NONE -d LTO_CLANG_FULL
-
-        # 3) Switch O2 -> O3 (Kconfig option)
-        ./scripts/config --file out/.config \
-          -d CC_OPTIMIZE_FOR_PERFORMANCE \
-          -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
-
-        # 4) Branding for About Phone
-        ./scripts/config --file out/.config -d LOCALVERSION -e LOCALVERSION_AUTO
-        # append LOCALVERSION string (will be picked up by olddefconfig)
-        echo 'CONFIG_LOCALVERSION="-COMBACT-thinlto-O3"' >> out/.config
-
-        # 5) Scheduler / CPUfreq
-        ./scripts.config() { ./scripts/config --file out/.config "$@"; }
-        ./scripts/config --file out/.config -e CPU_FREQ_GOV_SCHEDUTIL -e CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
-        ./scripts/config --file out/.config -e UCLAMP_TASK -e UCLAMP_TASK_GROUP -e SCHED_AUTOGROUP
-
-        # 6) Memory: zswap/zsmalloc/zram writeback + compression
-        ./scripts/config --file out/.config -e ZSWAP -e ZSMALLOC -e Z3FOLD -e ZRAM_WRITEBACK
-        ./scripts/config --file out/.config -e CRYPTO_LZ4 -e CRYPTO_ZSTD
-
-        # 7) Networking: BBR + fq_codel
-        ./scripts/config --file out/.config -e TCP_CONG_BBR -e NET_SCH_FQ_CODEL -e NET_SCH_FQ
-
-        # 8) Devfreq & thermal user-space hooks (lets userspace/gamespace tune devfreq)
-        ./scripts/config --file out/.config -e DEVFREQ_GOV_USERSPACE -e DEVFREQ_GOV_SIMPLE_ONDEMAND
-        ./scripts/config --file out/.config -e PM_DEVFREQ_EVENT -e THERMAL_GOV_USER_SPACE
-
-        # 9) I/O schedulers: BFQ + Kyber
-        ./scripts/config --file out/.config -e IOSCHED_BFQ -e IOSCHED_KYBER
-
-        # 10) finalize config
         make O=out olddefconfig
 
-    - name: Insert dmesg branding
+    - name: Build malidp_drv module
       run: |
-        # Add a small boot-time pr_info message into init/main.c (only if not already present)
-        if grep -q "Kernel Built with ThinLTO + O3 Optimization" init/main.c 2>/dev/null; then
-          echo "branding already present"
-        else
-          # Insert the pr_info line after the first occurrence of "Linux version" printk to show in dmesg early
-          awk '{
-            print
-          }
-          /Linux version/ && !inserted {
-            print "    pr_info(\"Kernel Built with ThinLTO + O3 Optimization\\n\");"
-            inserted=1
-          }' init/main.c > init/main.c.tmp && mv init/main.c.tmp init/main.c
-          git add init/main.c || true
-          echo "inserted branding into init/main.c"
-        fi
+        export O=out
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CC=clang
+        export LLVM=1
+        export LLVM_IAS=1
+        cd drivers/gpu/drm/arm
+        make -C $GITHUB_WORKSPACE O=$O M=$(pwd) modules
 
-    - name: Build Kernel + DTBs
-      run: |
-        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1
-        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1
+    - name: Copy malidp_drv.ko
+      run: cp out/drivers/gpu/drm/arm/malidp_drv.ko $GITHUB_WORKSPACE/
 
-    - name: Prepare AnyKernel3
-      run: |
-        rm -rf AnyKernel3 || true
-        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-        cp out/arch/arm64/boot/Image AnyKernel3/Image
-        # copy dtb files if available
-        shopt -s globstar || true
-        cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ 2>/dev/null || true
-        if [ -f out/arch/arm64/boot/dtbo.img ]; then
-          cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
-        fi
-        cp out/.config AnyKernel3/.config || true
-
-    - name: Pack AnyKernel3 ZIP
-      run: |
-        cd AnyKernel3
-        zip -r9 ../CMF_Kernel-6.1-COMBACT-thinlto-O3.zip *
-
-    - name: Upload AnyKernel3 ZIP
+    - name: Upload malidp_drv module
       uses: actions/upload-artifact@v4
       with:
-        name: CMF_Kernel-6.1-COMBACT-thinlto-O3
-        path: CMF_Kernel-6.1-COMBACT-thinlto-O3.zip
+        name: malidp_drv.ko
+        path: malidp_drv.ko
         
