@@ -1,4 +1,4 @@
-name: Build malidp_drv Module
+name: Build malidp_drv Module Only
 
 on:
   workflow_dispatch:
@@ -37,19 +37,19 @@ jobs:
         echo "LLVM=1" >> $GITHUB_ENV
         echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-    - name: Configure Kernel (minimal for modules)
-      run: |
-        make O=out gki_defconfig
-        make O=out olddefconfig
-
-    - name: Build malidp_drv module
+    - name: Prepare kernel for module build
       run: |
         export O=out
         export ARCH=arm64
         export SUBARCH=arm64
-        export CC=clang
-        export LLVM=1
-        export LLVM_IAS=1
+        make O=$O gki_defconfig
+        make O=$O olddefconfig
+        make O=$O prepare
+        make O=$O modules_prepare
+
+    - name: Build malidp_drv module
+      run: |
+        export O=out
         cd drivers/gpu/drm/arm
         make -C $GITHUB_WORKSPACE O=$O M=$(pwd) modules
 
