@@ -1,4 +1,4 @@
-name: Build malidp_drv Module Only
+name: Build CMF Mali Module Only
 
 on:
   workflow_dispatch:
@@ -39,26 +39,17 @@ jobs:
 
     - name: Prepare kernel for module build
       run: |
-        export O=out
-        export ARCH=arm64
-        export SUBARCH=arm64
-        make O=$O gki_defconfig
-        make O=$O olddefconfig
-        make O=$O prepare
-        make O=$O modules_prepare
+        make O=out gki_defconfig
+        make O=out olddefconfig
+        make O=out modules_prepare
 
-    - name: Build malidp_drv module
+    - name: Build malidp_drv module only
       run: |
         export O=out
         cd drivers/gpu/drm/arm
         make -C $GITHUB_WORKSPACE O=$O M=$(pwd) modules
 
-    - name: Copy malidp_drv.ko
-      run: cp out/drivers/gpu/drm/arm/malidp_drv.ko $GITHUB_WORKSPACE/
-
-    - name: Upload malidp_drv module
-      uses: actions/upload-artifact@v4
-      with:
-        name: malidp_drv.ko
-        path: malidp_drv.ko
+    - name: Copy built module
+      run: |
+        cp drivers/gpu/drm/arm/malidp_drv.ko $GITHUB_WORKSPACE/
         
