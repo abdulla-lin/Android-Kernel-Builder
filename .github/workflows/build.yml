@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (ThinLTO + O3 + Verbose)
+name: Build CMF Phone 1 Kernel (ThinLTO + O3 + Tuned)
 
 on:
   workflow_dispatch:
@@ -37,22 +37,72 @@ jobs:
         echo "LLVM=1" >> $GITHUB_ENV
         echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-    - name: Configure Kernel (ThinLTO)
+    - name: Configure Kernel (GKI + ThinLTO + O3 + Tunings)
       run: |
+        # 1. Load GKI base config
         make O=out gki_defconfig
+
+        # 2. Apply ThinLTO
         ./scripts/config --file out/.config \
           -e LTO_CLANG_THIN \
           -e THINLTO \
           -d LTO_NONE \
           -d LTO_CLANG_FULL
+
+        # 3. Force O3 optimization
+        ./scripts/config --file out/.config \
+          -d CC_OPTIMIZE_FOR_PERFORMANCE \
+          -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
+
+        # 4. Branding
+        ./scripts/config --file out/.config \
+          -d LOCALVERSION \
+          -e LOCALVERSION_AUTO
+        echo 'CONFIG_LOCALVERSION="-COMBACT-ThinLTO-O3-Tuned"' >> out/.config
+
+        # 5. CPU scheduling & efficiency
+        ./scripts/config --file out/.config \
+          -e CPU_FREQ_GOV_SCHEDUTIL \
+          -e CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
+          -e UCLAMP_TASK \
+          -e UCLAMP_TASK_GROUP \
+          -e SCHED_AUTOGROUP
+
+        # 6. Memory optimizations
+        ./scripts/config --file out/.config \
+          -e ZSWAP \
+          -e ZSMALLOC \
+          -e Z3FOLD \
+          -e ZRAM_WRITEBACK \
+          -e CRYPTO_LZ4 \
+          -e CRYPTO_ZSTD
+
+        # 7. Network improvements
+        ./scripts/config --file out/.config \
+          -e TCP_CONG_BBR \
+          -e NET_SCH_FQ_CODEL \
+          -e NET_SCH_FQ
+
+        # 8. Devfreq governors & thermal userspace
+        ./scripts/config --file out/.config \
+          -e DEVFREQ_GOV_USERSPACE \
+          -e DEVFREQ_GOV_SIMPLE_ONDEMAND \
+          -e PM_DEVFREQ_EVENT \
+          -e THERMAL_GOV_USER_SPACE
+
+        # 9. I/O schedulers
+        ./scripts/config --file out/.config \
+          -e IOSCHED_BFQ \
+          -e IOSCHED_KYBER
+
+        # 10. Finalize dependencies
         make O=out olddefconfig
 
-    - name: Build Kernel + DTB with O3 (Verbose)
+    - name: Build Kernel + DTB with O3
       run: |
         export KCFLAGS="-O3"
-        # Enable verbose output (V=1) to see what fails
-        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS" V=1
-        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS" V=1
+        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
+        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
 
     - name: Prepare AnyKernel3
       run: |
@@ -66,11 +116,11 @@ jobs:
     - name: Pack AnyKernel3 ZIP
       run: |
         cd AnyKernel3
-        zip -r9 ../CMF_Kernel-6.1.68-ThinLTO-O3.zip *
+        zip -r9 ../CMF_Kernel-6.1.68-ThinLTO-O3-Tuned.zip *
 
     - name: Upload AnyKernel3 ZIP
       uses: actions/upload-artifact@v4
       with:
-        name: CMF_Kernel-6.1.68-ThinLTO-O3
-        path: CMF_Kernel-6.1.68-ThinLTO-O3.zip
+        name: CMF_Kernel-6.1.68-ThinLTO-O3-Tuned
+        path: CMF_Kernel-6.1.68-ThinLTO-O3-Tuned.zip
         
