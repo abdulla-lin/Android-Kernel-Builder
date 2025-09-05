@@ -55,10 +55,7 @@ jobs:
           -e CONFIG_ZRAM_LZ4 \
           -e CONFIG_PM_WAKELOCKS \
           -e CONFIG_PM_WAKELOCKS_GC \
-          -e CONFIG_CHICK_KERNEL_RNG \
           -e CONFIG_CFS_BANDWIDTH \
-          -e CONFIG_PREEMPT_VOLUNTARY \
-          -e CONFIG_CGROUP_SCHED \
           -d CONFIG_PM_WAKELOCKS_LIMIT   # disables limit, 0 = unlimited
         make O=out olddefconfig
 
