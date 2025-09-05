@@ -51,6 +51,7 @@ jobs:
           -e CONFIG_RCU_BOOST \
           -e CONFIG_RCU_NOCB_CPU \
           -e CONFIG_WORKQUEUE_POWER_EFFICIENT \
+          -e CONFIG_ZRAM_WRITEBACK
           -e CONFIG_ZRAM \
           -e CONFIG_ZRAM_LZ4 \
           -e CONFIG_PM_WAKELOCKS \
