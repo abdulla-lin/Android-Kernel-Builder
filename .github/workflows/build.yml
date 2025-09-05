@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (ThinLTO + O3)
+name: Build CMF Phone 1 Kernel (ThinLTO + O3 + ChickKernel tweaks)
 
 on:
   workflow_dispatch:
@@ -21,6 +21,7 @@ jobs:
           bc bison build-essential cpio curl flex git libssl-dev \
           libncurses5-dev zlib1g-dev libelf-dev dwarves \
           wget unzip xz-utils tar clang lld llvm binutils
+
     - name: Setup LLVM toolchain
       run: |
         export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
@@ -35,20 +36,38 @@ jobs:
         echo "CC=clang" >> $GITHUB_ENV
         echo "LLVM=1" >> $GITHUB_ENV
         echo "LLVM_IAS=1" >> $GITHUB_ENV
-    - name: Configure Kernel (ThinLTO)
+
+    - name: Configure Kernel (ThinLTO + ChickKernel tweaks)
       run: |
         make O=out gki_defconfig
+        # ThinLTO options
         ./scripts/config --file out/.config \
           -e LTO_CLANG_THIN \
           -e THINLTO \
           -d LTO_NONE \
           -d LTO_CLANG_FULL
+        # ChickKernel tweaks
+        ./scripts/config --file out/.config \
+          -e CONFIG_RCU_BOOST \
+          -e CONFIG_RCU_NOCB_CPU \
+          -e CONFIG_WORKQUEUE_POWER_EFFICIENT \
+          -e CONFIG_ZRAM \
+          -e CONFIG_ZRAM_LZ4 \
+          -e CONFIG_PM_WAKELOCKS \
+          -e CONFIG_PM_WAKELOCKS_GC \
+          -e CONFIG_CHICK_KERNEL_RNG \
+          -e CONFIG_CFS_BANDWIDTH \
+          -e CONFIG_PREEMPT_VOLUNTARY \
+          -e CONFIG_CGROUP_SCHED \
+          -d CONFIG_PM_WAKELOCKS_LIMIT   # disables limit, 0 = unlimited
         make O=out olddefconfig
+
     - name: Build Kernel + DTB with O3
       run: |
         export KCFLAGS="-O3"
         make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
         make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
+
     - name: Prepare AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
@@ -57,13 +76,14 @@ jobs:
         if [ -f out/arch/arm64/boot/dtbo.img ]; then
           cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
         fi
+
     - name: Pack AnyKernel3 ZIP
       run: |
         cd AnyKernel3
-        zip -r9 ../CMF_Kernel-6.1.68-ThinLTO-O3.zip *
+        zip -r9 ../CMF_Kernel-6.1.68-ThinLTO-O3-Chick.zip *
+
     - name: Upload AnyKernel3 ZIP
       uses: actions/upload-artifact@v4
       with:
-        name: CMF_Kernel-6.1.68-ThinLTO-O3
-        path: CMF_Kernel-6.1.68-ThinLTO-O3.zip
-        
+        name: CMF_Kernel-6.1.68-ThinLTO-O3-Chick
+        path: CMF_Kernel-6.1.68-ThinLTO-O3-Chick.zip
