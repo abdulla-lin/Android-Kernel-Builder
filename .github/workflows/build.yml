@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (ThinLTO + O3)
+name: Build CMF Phone 1 Kernel (ThinLTO + O3 + Verbose)
 
 on:
   workflow_dispatch:
@@ -44,11 +44,12 @@ jobs:
           -d LTO_NONE \
           -d LTO_CLANG_FULL
         make O=out olddefconfig
-    - name: Build Kernel + DTB with O3
+    - name: Build Kernel + DTB with O3 (Verbose)
       run: |
         export KCFLAGS="-O3"
-        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
-        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
+        # Enable verbose output (V=1) to see what fails
+        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS" V=1
+        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS" V=1
     - name: Prepare AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
@@ -66,4 +67,3 @@ jobs:
       with:
         name: CMF_Kernel-6.1.68-ThinLTO-O3
         path: CMF_Kernel-6.1.68-ThinLTO-O3.zip
-        
