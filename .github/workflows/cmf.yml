@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (kleaf GKI)
+name: Build CMF Phone 1 Kernel (ThinLTO + O3)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo (manifest)
+    - name: Checkout kernel source
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
@@ -20,36 +20,62 @@ jobs:
         sudo apt-get install -y \
           bc bison build-essential cpio curl flex git libssl-dev \
           libncurses5-dev zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar clang lld llvm binutils \
-          python3 python3-pip
+          wget unzip xz-utils tar clang lld llvm binutils
 
-    - name: Setup Bazelisk
+    - name: Setup LLVM toolchain
       run: |
-        sudo curl -L https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64 -o /usr/local/bin/bazel
-        sudo chmod +x /usr/local/bin/bazel
-        bazel version
-
-    - name: Configure environment
-      run: |
-        echo "BUILD_CONFIG=kernel-6.1/build.config.constants" >> $GITHUB_ENV
-        echo "OUT_DIR=out" >> $GITHUB_ENV
+        export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CC=clang
+        export LLVM=1
+        export LLVM_IAS=1
+        echo "PATH=$PATH" >> $GITHUB_ENV
         echo "ARCH=arm64" >> $GITHUB_ENV
         echo "SUBARCH=arm64" >> $GITHUB_ENV
+        echo "CC=clang" >> $GITHUB_ENV
+        echo "LLVM=1" >> $GITHUB_ENV
+        echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-    - name: Build kernel (kleaf)
+    - name: Configure Kernel (ThinLTO)
       run: |
-        bazel build --config=fast --config=local --jobs=$(nproc) \
-          //common:kernel_aarch64_dist
+        make O=out gki_defconfig
+        ./scripts/config --file out/.config \
+          -e LTO_CLANG_THIN \
+          -e THINLTO \
+          -d LTO_NONE \
+          -d LTO_CLANG_FULL
+        make O=out olddefconfig
 
-    - name: Collect artifacts
+    - name: Build Kernel + DTB with O3
       run: |
-        mkdir -p dist
-        cp -v bazel-bin/common/kernel_aarch64/Image.gz dist/ || true
-        cp -v bazel-bin/common/kernel_aarch64/*.img dist/ || true
-        cp -v bazel-bin/common/kernel_aarch64/*.tar.gz dist/ || true
+        export KCFLAGS="-O3"
+        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
+        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
 
-    - name: Upload artifacts
+    - name: Prepare AnyKernel3
+      run: |
+        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
+        cp out/arch/arm64/boot/Image AnyKernel3/Image
+        cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ || true
+        if [ -f out/arch/arm64/boot/dtbo.img ]; then
+          cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+        fi
+        if [ -f out/arch/arm64/boot/vendor_dlkm.img ]; then
+          cp out/arch/arm64/boot/vendor_dlkm.img AnyKernel3/vendor_dlkm.img
+        fi
+        if [ -f out/arch/arm64/boot/system_dlkm.img ]; then
+          cp out/arch/arm64/boot/system_dlkm.img AnyKernel3/system_dlkm.img
+        fi
+        cp anykernel.sh AnyKernel3/anykernel.sh
+
+    - name: Pack AnyKernel3 ZIP
+      run: |
+        cd AnyKernel3
+        zip -r9 ../CMF_Kernel-6.1.68-ThinLTO-O3.zip *
+
+    - name: Upload AnyKernel3 ZIP
       uses: actions/upload-artifact@v4
       with:
-        name: CMF_Phone1-kleaf-GKI
-        path: dist/*
+        name: CMF_Kernel-6.1.68-ThinLTO-O3
+        path: CMF_Kernel-6.1.68-ThinLTO-O3.zip
