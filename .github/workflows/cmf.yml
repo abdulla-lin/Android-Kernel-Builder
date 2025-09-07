@@ -1,18 +1,18 @@
-name: Build CMF Mali Module Only
+name: Build CMF Phone 1 Kernel (kleaf GKI)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build_module:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout kernel source
+    - name: Checkout repo (manifest)
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: main
+        ref: Tetris-2
 
     - name: Install dependencies
       run: |
@@ -20,36 +20,36 @@ jobs:
         sudo apt-get install -y \
           bc bison build-essential cpio curl flex git libssl-dev \
           libncurses5-dev zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar clang lld llvm binutils
+          wget unzip xz-utils tar clang lld llvm binutils \
+          python3 python3-pip
 
-    - name: Setup LLVM toolchain
+    - name: Setup Bazelisk
       run: |
-        export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CC=clang
-        export LLVM=1
-        export LLVM_IAS=1
-        echo "PATH=$PATH" >> $GITHUB_ENV
+        sudo curl -L https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64 -o /usr/local/bin/bazel
+        sudo chmod +x /usr/local/bin/bazel
+        bazel version
+
+    - name: Configure environment
+      run: |
+        echo "BUILD_CONFIG=kernel-6.1/build.config.constants" >> $GITHUB_ENV
+        echo "OUT_DIR=out" >> $GITHUB_ENV
         echo "ARCH=arm64" >> $GITHUB_ENV
         echo "SUBARCH=arm64" >> $GITHUB_ENV
-        echo "CC=clang" >> $GITHUB_ENV
-        echo "LLVM=1" >> $GITHUB_ENV
-        echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-    - name: Prepare kernel for module build
+    - name: Build kernel (kleaf)
       run: |
-        make O=out gki_defconfig
-        make O=out olddefconfig
-        make O=out modules_prepare
+        bazel build --config=fast --config=local --jobs=$(nproc) \
+          //common:kernel_aarch64_dist
 
-    - name: Build malidp_drv module only
+    - name: Collect artifacts
       run: |
-        export O=out
-        cd drivers/gpu/drm/arm
-        make -C $GITHUB_WORKSPACE O=$O M=$(pwd) modules
+        mkdir -p dist
+        cp -v bazel-bin/common/kernel_aarch64/Image.gz dist/ || true
+        cp -v bazel-bin/common/kernel_aarch64/*.img dist/ || true
+        cp -v bazel-bin/common/kernel_aarch64/*.tar.gz dist/ || true
 
-    - name: Copy built module
-      run: |
-        cp drivers/gpu/drm/arm/malidp_drv.ko $GITHUB_WORKSPACE/
-        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: CMF_Phone1-kleaf-GKI
+        path: dist/*
