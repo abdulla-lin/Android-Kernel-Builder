@@ -26,60 +26,72 @@ jobs:
           chmod +x ~/repo
           sudo mv ~/repo /usr/local/bin/
 
-      - name: Init repo
-        run: |
-          mkdir -p kernel_build
-          cd kernel_build
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
-
-      - name: Create local manifest
+      - name: Prepare local manifest
         run: |
           mkdir -p kernel_build/.repo/local_manifests
           cat > kernel_build/.repo/local_manifests/local_manifest.xml <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <manifest>
-            <remote fetch="https://github.com" name="github"/>
+          <remote fetch="https://github.com" name="github"/>
 
-            <!-- Remove unused Android Common Kernel projects -->
-            <remove-project name="kernel/common"/>
-            <remove-project name="kernel/common-modules/virtual-device"/>
-            <remove-project name="kernel/build"/>
+          <!-- Remove unused Android Common Kernel projects -->
+          <remove-project name="kernel/common"/>
+          <remove-project name="kernel/common-modules/virtual-device"/>
+          <remove-project name="kernel/build"/>
 
-            <!-- Replace kernel/build with correct Kleaf -->
-            <project path="build/kernel" name="kernel/build">
-              <linkfile src="kleaf/bazel.sh" dest="tools/bazel"/>
-              <linkfile src="build_test.sh" dest="build/build_test.sh"/>
-              <linkfile src="config.sh" dest="build/config.sh"/>
-            </project>
-            <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
-              <linkfile src="BUILD.bazel" dest="BUILD"/>
-              <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE"/>
-            </project>
+          <!-- Replace kernel/build with correct Kleaf -->
+          <project path="build/kernel" name="kernel/build">
+          <linkfile src="kleaf/bazel.sh" dest="tools/bazel"/>
+          <linkfile src="build_test.sh" dest="build/build_test.sh"/>
+          <linkfile src="config.sh" dest="build/config.sh"/>
+          </project>
 
-            <!-- Main kernel -->
-            <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
-              <linkfile src="build.config.constants" dest="build.config.constants"/>
-            </project>
+          <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
+          <linkfile src="BUILD.bazel" dest="BUILD"/>
+          <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE"/>
+          </project>
 
-            <!-- Device modules -->
-            <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
-              <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config"/>
-            </project>
+          <!-- Main kernel -->
+          <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
+          <linkfile src="build.config.constants" dest="build.config.constants"/>
+          </project>
 
-            <!-- Vendor kernel modules -->
-            <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
+          <!-- Device modules with build.config fix -->
+          <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
+          <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config"/>
+          </project>
+
+          <!-- Vendor kernel modules -->
+          <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
           </manifest>
-          EOF
+           EOF
 
       - name: Repo sync
         run: |
           cd kernel_build
-          repo sync -j$(nproc) --force-sync
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
+          repo sync -c -j$(nproc) --no-clone-bundle --no-tags
+
+      - name: Fix build.config for modules
+        run: |
+          cd kernel_build/kernel_device_modules-6.1
+          if [ ! -f build.config ]; then
+            echo "⚠️ build.config not found, fixing..."
+            if [ -f build.config.mtk_kernel_device_modules ]; then
+              cp build.config.mtk_kernel_device_modules build.config
+              echo "✅ build.config created from build.config.mtk_kernel_device_modules"
+            else
+              echo "❌ build.config.mtk_kernel_device_modules missing too!"
+              exit 1
+            fi
+          else
+            echo "✅ build.config already exists"
+          fi
 
       - name: Build kernel (Kleaf)
         run: |
           cd kernel_build/kernel_device_modules-6.1
-          ./build.sh
+          bash build.sh
 
       - name: Collect artifacts
         run: |
