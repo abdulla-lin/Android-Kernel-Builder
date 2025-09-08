@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (Kleaf + AnyKernel3)
+name: Build Kernel with Kleaf
 
 on:
   workflow_dispatch:
@@ -8,10 +8,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout Kernel Source
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -20,45 +20,28 @@ jobs:
             wget unzip xz-utils tar clang lld llvm binutils \
             python3 python3-pip openjdk-11-jdk realpath
 
-      - name: Install repo tool
+      - name: Install Repo Tool
         run: |
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
           chmod +x ~/repo
           sudo mv ~/repo /usr/local/bin/
 
-      - name: Init kernel repo
+      - name: Initialize Repo
         run: |
           mkdir -p kernel_build
           cd kernel_build
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
 
-      - name: Clone kernel device modules (GitLab)
+      - name: Sync Repo
+        run: |
+          cd kernel_build
+          repo sync -j$(nproc) --force-sync
+
+      - name: Clone Device Modules
         run: |
           git clone --depth=1 -b v1-u https://gitlab.e.foundation/e/devices/android_kernel_nothing_tetris-device_modules.git kernel_build/kernel_device_modules-6.1
 
-      - name: Create local manifest (GitHub repos)
-        run: |
-          mkdir -p kernel_build/.repo/local_manifests
-          cat > kernel_build/.repo/local_manifests/local_manifest.xml <<'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <manifest>
-            <remote fetch="https://github.com" name="github"/>
-            <remove-project name="kernel/common"/>
-            <remove-project name="kernel/common-modules/virtual-device"/>
-            <remove-project name="kernel/build"/>
-            <project path="build/kernel" name="kernel/build">
-              <linkfile src="kleaf/bazel.sh" dest="tools/bazel"/>
-              <linkfile src="build_test.sh" dest="build/build_test.sh"/>
-              <linkfile src="config.sh" dest="build/config.sh"/>
-            </project>
-            <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
-              <linkfile src="BUILD.bazel" dest="BUILD"/>
-              <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE"/>
-            </project>
-          </manifest>
-          EOF
-
-      - name: Create build.config for device modules
+      - name: Create build.config
         run: |
           cat > kernel_build/kernel_device_modules-6.1/build.config <<'EOF'
 DEVICE=mt6878
@@ -68,17 +51,12 @@ DEVICE_MODULES_DIR=.
 OUT_DIR=$ROOT_DIR/out/android14-6.1
 EOF
 
-      - name: Repo sync
-        run: |
-          cd kernel_build
-          repo sync -j$(nproc) --force-sync
-
-      - name: Build kernel (Kleaf)
+      - name: Build Kernel with Kleaf
         run: |
           cd kernel_build/kernel_device_modules-6.1
-          ./build.sh
+          tools/bazel run //common:kernel_aarch64_dist -- --destdir=$OUT_DIR
 
-      - name: Collect raw kernel artifacts
+      - name: Collect Artifacts
         run: |
           mkdir -p artifacts
           cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
@@ -86,27 +64,8 @@ EOF
           cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
           cd artifacts && zip -r ../kernel_artifacts.zip *
 
-      - name: Upload raw kernel artifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel_artifacts
           path: kernel_artifacts.zip
-
-      - name: Prepare AnyKernel3
-        run: |
-          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-          cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
-          cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
-          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
-          cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
-
-      - name: Pack AnyKernel3 flashable ZIP
-        run: |
-          cd AnyKernel3
-          zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d).zip *
-
-      - name: Upload AnyKernel3 flashable ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: CMF_Kernel-Flashable-ZIP
-          path: CMF_Kernel-6.1-*.zip
