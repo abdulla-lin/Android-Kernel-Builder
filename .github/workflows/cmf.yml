@@ -1,4 +1,4 @@
-name: Build Kernel with Kleaf
+name: Build CMF Kernel with Kleaf
 
 on:
   workflow_dispatch:
@@ -46,7 +46,7 @@ jobs:
           mkdir -p kernel_build/.repo/local_manifests
           cp kernel_build/kernel_device_modules-6.1/local_manifest.xml kernel_build/.repo/local_manifests/
 
-      - name: Create build.config
+      - name: Create build.config for Device Modules
         run: |
           cat > kernel_build/kernel_device_modules-6.1/build.config <<'EOF'
 DEVICE=mt6878
@@ -59,9 +59,9 @@ EOF
       - name: Build Kernel with Kleaf
         run: |
           cd kernel_build/kernel_device_modules-6.1
-          tools/bazel run //common:kernel_aarch64_dist -- --destdir=$OUT_DIR
+          ./build.sh
 
-      - name: Collect Artifacts
+      - name: Collect Raw Kernel Artifacts
         run: |
           mkdir -p artifacts
           cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
@@ -69,8 +69,27 @@ EOF
           cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
           cd artifacts && zip -r ../kernel_artifacts.zip *
 
-      - name: Upload Artifacts
+      - name: Upload Raw Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel_artifacts
           path: kernel_artifacts.zip
+
+      - name: Prepare AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
+          cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
+
+      - name: Pack AnyKernel3 Flashable ZIP
+        run: |
+          cd AnyKernel3
+          zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d).zip *
+
+      - name: Upload AnyKernel3 Flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: CMF_Kernel-Flashable-ZIP
+          path: CMF_Kernel-6.1-*.zip
