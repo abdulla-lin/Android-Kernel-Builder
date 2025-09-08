@@ -44,12 +44,12 @@ jobs:
       - name: Create build.config for Device Modules
         run: |
           cat > kernel_build/kernel_device_modules-6.1/build.config <<'EOF'
-DEVICE=mt6878
-KERNEL_VERSION=6.1
-ROOT_DIR=$(pwd)
-DEVICE_MODULES_DIR=.
-OUT_DIR=$ROOT_DIR/out/android14-6.1
-EOF
+          DEVICE=mt6878
+          KERNEL_VERSION=6.1
+          ROOT_DIR=$(pwd)
+          DEVICE_MODULES_DIR=.
+          OUT_DIR=$ROOT_DIR/out/android14-6.1
+          EOF
 
       - name: Build Kernel with Kleaf
         run: |
