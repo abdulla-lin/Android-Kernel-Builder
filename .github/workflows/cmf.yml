@@ -26,10 +26,17 @@ jobs:
           chmod +x ~/repo
           sudo mv ~/repo /usr/local/bin/
 
-      - name: Prepare local manifest
+      - name: Initialize repo
         run: |
-          mkdir -p kernel_build/.repo/local_manifests
-          cat > kernel_build/.repo/local_manifests/local_manifest.xml <<'EOF'
+          mkdir -p kernel_build
+          cd kernel_build
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
+
+      - name: Add local manifest
+        run: |
+          cd kernel_build
+          mkdir -p .repo/local_manifests
+          cat > .repo/local_manifests/local_manifest.xml <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <manifest>
           <remote fetch="https://github.com" name="github"/>
@@ -46,7 +53,7 @@ jobs:
           <linkfile src="config.sh" dest="build/config.sh"/>
           </project>
 
-          <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
+          <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="and lease-u3uc34.63-31-6">
           <linkfile src="BUILD.bazel" dest="BUILD"/>
           <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE"/>
           </project>
@@ -64,12 +71,11 @@ jobs:
           <!-- Vendor kernel modules -->
           <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
           </manifest>
-           EOF
+          EOF
 
       - name: Repo sync
         run: |
           cd kernel_build
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
           repo sync -c -j$(nproc) --no-clone-bundle --no-tags
 
       - name: Fix build.config for modules
