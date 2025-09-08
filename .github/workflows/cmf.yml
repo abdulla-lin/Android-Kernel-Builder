@@ -1,4 +1,4 @@
-name: Build CMF Phone 1 Kernel (Kleaf + AnyKernel3)
+name: Build Nothing Tetris Kernel (Kleaf)
 
 on:
   workflow_dispatch:
@@ -39,19 +39,34 @@ jobs:
           <?xml version="1.0" encoding="UTF-8"?>
           <manifest>
             <remote fetch="https://github.com" name="github"/>
-            <remote fetch="https://gitlab.e.foundation/e/devices/" name="gitlab"/>
 
+            <!-- Remove unused Android Common Kernel projects -->
             <remove-project name="kernel/common"/>
+            <remove-project name="kernel/common-modules/virtual-device"/>
             <remove-project name="kernel/build"/>
 
+            <!-- Replace kernel/build with correct Kleaf -->
             <project path="build/kernel" name="kernel/build">
               <linkfile src="kleaf/bazel.sh" dest="tools/bazel"/>
               <linkfile src="build_test.sh" dest="build/build_test.sh"/>
               <linkfile src="config.sh" dest="build/config.sh"/>
             </project>
+            <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
+              <linkfile src="BUILD.bazel" dest="BUILD"/>
+              <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE"/>
+            </project>
 
-            <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u"/>
-            <project remote="gitlab" name="android_kernel_nothing_tetris-device_modules" path="kernel_device_modules-6.1" revision="v1-u"/>
+            <!-- Main kernel -->
+            <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
+              <linkfile src="build.config.constants" dest="build.config.constants"/>
+            </project>
+
+            <!-- Device modules -->
+            <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
+              <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config"/>
+            </project>
+
+            <!-- Vendor kernel modules -->
             <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
           </manifest>
           EOF
@@ -61,23 +76,12 @@ jobs:
           cd kernel_build
           repo sync -j$(nproc) --force-sync
 
-      - name: Sanity check repos
-        run: |
-          echo ">>> Checking synced repos"
-          ls -l kernel_build
-          echo
-          echo ">>> Checking device modules"
-          ls -l kernel_build/kernel_device_modules-6.1 || true
-          echo
-          echo ">>> Dumping build.config if exists"
-          cat kernel_build/kernel_device_modules-6.1/build.config || echo "No build.config found!"
-
       - name: Build kernel (Kleaf)
         run: |
           cd kernel_build/kernel_device_modules-6.1
           ./build.sh
 
-      - name: Collect raw kernel artifacts
+      - name: Collect artifacts
         run: |
           mkdir -p artifacts
           cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
