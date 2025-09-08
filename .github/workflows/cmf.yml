@@ -26,13 +26,17 @@ jobs:
           chmod +x ~/repo
           sudo mv ~/repo /usr/local/bin/
 
-      - name: Init repo
+      - name: Init kernel repo
         run: |
           mkdir -p kernel_build
           cd kernel_build
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
 
-      - name: Create local manifest
+      - name: Clone kernel device modules (GitLab)
+        run: |
+          git clone --depth=1 -b v1-u https://gitlab.e.foundation/e/devices/android_kernel_nothing_tetris-device_modules.git kernel_build/kernel_device_modules-6.1
+
+      - name: Create local manifest (GitHub repos)
         run: |
           mkdir -p kernel_build/.repo/local_manifests
           cat > kernel_build/.repo/local_manifests/local_manifest.xml <<'EOF'
@@ -51,15 +55,12 @@ jobs:
               <linkfile src="BUILD.bazel" dest="BUILD"/>
               <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE"/>
             </project>
-            <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
-              <linkfile src="build.config.constants" dest="build.config.constants"/>
-            </project>
-            <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
-              <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config"/>
-            </project>
-            <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
           </manifest>
           EOF
+
+      - name: Copy build.config for device modules
+        run: |
+          cp kernel_build/kernel_device_modules-6.1/build.config.mtk_kernel_device_modules kernel_build/kernel_device_modules-6.1/build.config
 
       - name: Repo sync
         run: |
