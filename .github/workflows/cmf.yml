@@ -1,90 +1,80 @@
-name: Build CMF Phone 1 Kernel (ThinLTO + O3)
+name: Build Kernel (Kleaf Bazel)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout kernel source
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: Tetris-2
+    - name: Checkout sources
+      uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          bc bison build-essential cpio curl flex git libssl-dev \
-          libncurses5-dev zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar clang lld llvm binutils
+          git-core gnupg flex bison build-essential \
+          zip curl zlib1g-dev gcc-multilib g++-multilib \
+          libc6-dev-i386 libncurses5 lib32ncurses5-dev \
+          x11proto-core-dev libx11-dev lib32z1-dev \
+          libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
+          python3 python-is-python3 openjdk-11-jdk rsync wget
 
-    - name: Setup LLVM toolchain
+    - name: Init repo
       run: |
-        export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CC=clang
-        export LLVM=1
-        export LLVM_IAS=1
-        echo "PATH=$PATH" >> $GITHUB_ENV
-        echo "ARCH=arm64" >> $GITHUB_ENV
-        echo "SUBARCH=arm64" >> $GITHUB_ENV
-        echo "CC=clang" >> $GITHUB_ENV
-        echo "LLVM=1" >> $GITHUB_ENV
-        echo "LLVM_IAS=1" >> $GITHUB_ENV
+        git config --global user.name "Github Actions"
+        git config --global user.email "actions@github.com"
+        mkdir kernel_build && cd kernel_build
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
 
-    - name: Configure Kernel (ThinLTO)
+    - name: Add local manifest
       run: |
-        make O=out gki_defconfig
-        ./scripts/config --file out/.config \
-          -e LTO_CLANG_THIN \
-          -e THINLTO \
-          -d LTO_NONE \
-          -d LTO_CLANG_FULL
-        make O=out olddefconfig
+        mkdir -p kernel_build/.repo/local_manifests
+        cat > kernel_build/.repo/local_manifests/local_manifest.xml <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote fetch="https://github.com" name="github"/>
 
-    - name: Build Kernel + DTB with O3
+  <remove-project name="kernel/common"/>
+  <remove-project name="kernel/common-modules/virtual-device"/>
+  <remove-project name="kernel/build"/>
+
+  <project path="build/kernel" name="kernel/build" >
+    <linkfile src="kleaf/bazel.sh" dest="tools/bazel" />
+    <linkfile src="build_test.sh" dest="build/build_test.sh" />
+    <linkfile src="config.sh" dest="build/config.sh" />
+  </project>
+
+  <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
+    <linkfile src="BUILD.bazel" dest="BUILD" />
+    <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
+  </project>
+
+  <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
+    <linkfile src="build.config.constants" dest="build.config.constants" />
+  </project>
+  <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
+    <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config" />
+  </project>
+  <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
+</manifest>
+EOF
+
+    - name: Repo sync
+      working-directory: kernel_build
+      run: repo sync -j$(nproc) --force-sync --no-tags --no-clone-bundle
+
+    - name: Build kernel (Kleaf Bazel)
+      working-directory: kernel_build/kernel_device_modules-6.1
       run: |
-        export KCFLAGS="-O3"
-        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
-        make O=out dtbs CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
+        chmod +x build.sh
+        ./build.sh
 
-    - name: Prepare AnyKernel3
-      run: |
-        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-
-        # Copy kernel image(s)
-        cp out/arch/arm64/boot/Image* AnyKernel3/ 2>/dev/null || true
-        cp out/arch/arm64/boot/zImage AnyKernel3/ 2>/dev/null || true
-
-        # Copy DTBO if present
-        if [ -f out/arch/arm64/boot/dtbo.img ]; then
-          cp out/arch/arm64/boot/dtbo.img AnyKernel3/
-        fi
-
-        # Copy modules if present
-        if [ -d out/vendor_dlkm ]; then
-          mkdir -p AnyKernel3/modules/vendor_dlkm
-          cp -r out/vendor_dlkm/* AnyKernel3/modules/vendor_dlkm/
-        fi
-
-        if [ -d out/system_dlkm ]; then
-          mkdir -p AnyKernel3/modules/system_dlkm
-          cp -r out/system_dlkm/* AnyKernel3/modules/system_dlkm/
-        fi
-
-    - name: Pack AnyKernel3 ZIP
-      run: |
-        cd AnyKernel3
-        zip -r9 ../CMF_Kernel-6.1.68-ThinLTO-O3.zip * -x .git README.md *placeholder
-        cd ..
-
-    - name: Upload AnyKernel3 ZIP
-      uses: actions/upload-artifact@v4
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
       with:
-        name: CMF_Kernel-6.1.68-ThinLTO-O3
-        path: CMF_Kernel-6.1.68-ThinLTO-O3.zip
+        name: kernel-build
+        path: |
+          kernel_build/out/**/*
