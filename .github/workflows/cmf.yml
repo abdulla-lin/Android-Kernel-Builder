@@ -96,4 +96,3 @@ EOF
         with:
           name: CMF_Kernel-Flashable-ZIP
           path: CMF_Kernel-6.1-*.zip
-          
