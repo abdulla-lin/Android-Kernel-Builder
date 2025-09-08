@@ -6,8 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Optional: Set a reasonable timeout to avoid hanging
-    ### timeout-minutes: 60
 
     steps:
       - name: Checkout Kernel Source
