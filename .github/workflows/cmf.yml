@@ -1,11 +1,11 @@
-name: Build Kernel (Kleaf Bazel)
+name: Build CMF Phone 1 Kernel (Kleaf + AnyKernel3)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout repo
@@ -15,55 +15,98 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          git-core gnupg flex bison build-essential \
-          zip curl zlib1g-dev gcc-multilib g++-multilib \
-          libc6-dev-i386 libncurses5 lib32ncurses5-dev \
-          x11proto-core-dev libx11-dev lib32z1-dev \
-          libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
-          python3 python-is-python3 openjdk-11-jdk rsync wget ca-certificates
+          bc bison build-essential cpio curl flex git libssl-dev \
+          libncurses5-dev zlib1g-dev libelf-dev dwarves \
+          wget unzip xz-utils tar clang lld llvm binutils \
+          python3 python3-pip openjdk-11-jdk
 
     - name: Install repo tool
       run: |
-        mkdir -p "$HOME/bin"
-        curl -sS https://storage.googleapis.com/git-repo-downloads/repo > "$HOME/bin/repo"
-        chmod a+x "$HOME/bin/repo"
-        echo "PATH=$HOME/bin:$PATH" >> $GITHUB_ENV
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
+        chmod +x ~/repo
+        sudo mv ~/repo /usr/local/bin/
 
     - name: Init repo
       run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
         mkdir -p kernel_build
         cd kernel_build
-        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
+        repo init -u https://android.googlesource.com/kernel/manifest \
+          -b common-android14-6.1
 
-    - name: Copy local manifest
+    - name: Create local manifest
       run: |
         mkdir -p kernel_build/.repo/local_manifests
-        cp .github/local_manifest.xml kernel_build/.repo/local_manifests/local_manifest.xml
+        cat > kernel_build/.repo/local_manifests/local_manifest.xml <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote fetch="https://github.com" name="github"/>
+
+  <!-- Remove unused Android Common Kernel projects -->
+  <remove-project name="kernel/common"/>
+  <remove-project name="kernel/common-modules/virtual-device"/>
+
+  <!-- Track MediaTek Generic Kernel bazel rules -->
+  <remove-project name="kernel/build"/>
+  <project path="build/kernel" name="kernel/build" >
+    <linkfile src="kleaf/bazel.sh" dest="tools/bazel" />
+    <linkfile src="build_test.sh" dest="build/build_test.sh" />
+    <linkfile src="config.sh" dest="build/config.sh" />
+  </project>
+  <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
+    <linkfile src="BUILD.bazel" dest="BUILD" />
+    <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
+  </project>
+
+  <!-- Track MediaTek Generic Kernel projects -->
+  <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
+    <linkfile src="build.config.constants" dest="build.config.constants" />
+  </project>
+  <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
+    <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config" />
+  </project>
+  <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
+</manifest>
+EOF
 
     - name: Repo sync
-      working-directory: kernel_build
-      run: repo sync -j$(nproc) --force-sync --no-tags --no-clone-bundle
-
-    - name: Build kernel (Kleaf Bazel)
-      working-directory: kernel_build/kernel_device_modules-6.1
       run: |
-        chmod +x build.sh
+        cd kernel_build
+        repo sync -j$(nproc) --force-sync
+
+    - name: Build kernel (Kleaf)
+      run: |
+        cd kernel_build/kernel_device_modules-6.1
         ./build.sh
 
-    - name: Package common artifacts
-      working-directory: kernel_build
+    - name: Collect raw kernel artifacts
       run: |
         mkdir -p artifacts
-        cp out/arch/arm64/boot/Image* artifacts/ 2>/dev/null || true
-        cp out/arch/arm64/boot/*.img artifacts/ 2>/dev/null || true
-        cp out/vendor_dlkm*.img artifacts/ 2>/dev/null || true
-        cp -r out/lib/modules artifacts/modules 2>/dev/null || true
-        zip -r kernel_artifacts.zip artifacts || true
+        cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
+        cp kernel_build/out/android14-6.1/dist/*.img artifacts/ || true
+        cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
+        cd artifacts && zip -r ../kernel_artifacts.zip *
 
-    - name: Upload artifacts
+    - name: Upload raw kernel artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-artifacts
-        path: kernel_build/kernel_artifacts.zip
+        name: kernel_artifacts
+        path: kernel_artifacts.zip
+
+    - name: Prepare AnyKernel3
+      run: |
+        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
+        cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
+        cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
+        cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
+        cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
+
+    - name: Pack AnyKernel3 flashable ZIP
+      run: |
+        cd AnyKernel3
+        zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d).zip *
+
+    - name: Upload AnyKernel3 flashable ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: CMF_Kernel-Flashable-ZIP
+        path: CMF_Kernel-6.1-*.zip
