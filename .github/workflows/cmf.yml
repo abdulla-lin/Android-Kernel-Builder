@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
@@ -36,17 +37,14 @@ jobs:
         cd kernel_build
         repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
 
-    - name: Add local manifest (written via base64 -> avoids heredoc/YAML parsing issues)
+    - name: Copy local manifest
       run: |
         mkdir -p kernel_build/.repo/local_manifests
-        echo 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPG1hbmlmZXQ+CiAgPHJlbW90ZSBmZXRjaD0iaHR0cHM6Ly9naXRodWIuY29tIiBuYW1lPSJnaXRodWIiLz4KICA8cmVtb3ZlLXByb2plY3QgbmFtZT0ia2VybmVsL2NvbW1vbiIvPgogIDxyZW1vdmUtcHJvamVjdCBuYW1lPSJrZXJuZWwvY29tbW9uLW1vZHVsZXMvdmlydHVhbC1kZXZpY2UiLz4KICA8cmVtb3ZlLXByb2plY3QgbmFtZT0ia2VybmVsL2J1aWxkIi8+CiAgPHByb2plY3QgcGF0aD0iYnVpbGQva2VybmVsIiBuYW1lPSJrZXJuZWwvYnVpbGQiPgogICAgPGxpbmtmaWxlIHNyYz0ia2xlYWYvYmF6ZWwuc2giIGRlc3Q9InRvb2xzL2JheiIvPgogICAgPGxpbmtmaWxlIHNyYz0iYnVpbGxfdGVzdC5zaCIgZGVzdD0iYnVpbGQvYnVpbGRfdGVzdC5zaCIvPgogICAgPGxpbmtmaWxlIHNyYz0iY29uZmlnLnNoIiBkZXN0PSJidWlsZC9jb25maWcuc2giLz4KICA8L3Byb2plY3Q+CiAgPHByb2plY3QgcmVtb3RlPSJnaXRodWIiIG5hbWU9Ik1hc2hvcHkvS2VybmVsLWJ1aWxkLWJhemVsX21nay1ydWxlcyIgcGF0aD0iYnVpbGQvYmF6ZWxfbWdnX3J1bGVzIiByZXZpc2lvbj0iYW5kcm9pZC0xNC1yZWxlYXNlLXUzdWMzNC42My0zMS02Ij4KICAgIDxsaW5rZmlsZSBzcmM9IkJVRUxELmJhenVsIiBkZXN0PSJCVUlsRCIvPgogICAgPGxpbmtmaWxlIHNyYz0ia2xlYWYvYmF6ZWwuV09SS0lTUEFDRSIgZGVzdD0iV09SS0lTUEFDRSIvPgogIDwvcHJvamVjdD4KICA8cHJvamVjdCByZW1vdGU9ImdpdGh1YiIgbmFtZT0iTm90aGluZ09TUy9hbmRyb2lkX2tlcm5lbF82LjFfbm90aGluZ190djc4IiBwb3N0PSJrZXJuZWwtNi4xIiByZXZpc2lvbj0ibXQ2ODc4L1RldHJpcy91Ij4KICAgIDxsaW5rZmlsZSBzcmM9ImJ1aWxkLmNvbmZpZy5jb25zdGFudHMiIGRlc3Q9ImJ1aWxkLmNvbmZpZy5jb25zdGFudHMiLz4KICA8L3Byb2plY3Q+CiAgPHByb2plY3QgcmVtb3RlPSJnaXRodWIiIG5hbWU9Ik1hc2hvcHkvYW5kcm9pZF9rZXJuZWxfZGV2aWNlX21vZHVsZXNfNi4xX25vdGhpbmdfdHY2ODBfIiBwb3N0PSJrZXJuZWxfZGV2aWNlX21vZHVsZXMtNi4xIiByZXZpc2lvbj0ibXQ2ODc4L1RldHJpcy91Ij4KICAgIDxsaW5rZmlsZSBzcmM9ImJ1aWxkLmNvbmZpZy5tdGtf
-cm5lbF9rZXJuZWxfZGV2aWNlX21vZHVsZXMiIGRlc3Q9ImJ1aWxkLmNvbmZpZyIvPgogIDwvcHJvamVjdD4KICA8cHJvamVjdCByZW1vdGU9ImdpdGh1YiIgbmFtZT0iTm90aGluZ09TUy9hbmRyb2lkX2tlcm5lbF9tb2R1bGVzX25vdGhpbmdfdHY2ODc4IiBwb3N0PSJ2ZW5kb3Iv bWVkaWF0ZWsv
-a2VybmVsX21vZHVsZXMiIHJldmlzaW9uPSJtdDY4NzgvVGV0cmlzL3UiLz4KPC9tYW5pZmV0Pg== ' | base64 -d > kernel_build/.repo/local_manifests/local_manifest.xml
+        cp .github/local_manifest.xml kernel_build/.repo/local_manifests/local_manifest.xml
 
     - name: Repo sync
       working-directory: kernel_build
-      run: |
-        repo sync -j$(nproc) --force-sync --no-tags --no-clone-bundle
+      run: repo sync -j$(nproc) --force-sync --no-tags --no-clone-bundle
 
     - name: Build kernel (Kleaf Bazel)
       working-directory: kernel_build/kernel_device_modules-6.1
@@ -54,11 +52,10 @@ a2VybmVsX21vZHVsZXMiIHJldmlzaW9uPSJtdDY4NzgvVGV0cmlzL3UiLz4KPC9tYW5pZmV0Pg== ' |
         chmod +x build.sh
         ./build.sh
 
-    - name: Package common artifacts (trim uploads)
+    - name: Package common artifacts
       working-directory: kernel_build
       run: |
         mkdir -p artifacts
-        # Copy common kernel outputs (if present)
         cp out/arch/arm64/boot/Image* artifacts/ 2>/dev/null || true
         cp out/arch/arm64/boot/*.img artifacts/ 2>/dev/null || true
         cp out/vendor_dlkm*.img artifacts/ 2>/dev/null || true
