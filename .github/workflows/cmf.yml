@@ -32,7 +32,7 @@ jobs:
     - name: Add local manifest
       run: |
         mkdir -p kernel_build/.repo/local_manifests
-        cat <<'EOF' > kernel_build/.repo/local_manifests/local_manifest.xml
+        cat > kernel_build/.repo/local_manifests/local_manifest.xml <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest>
   <remote fetch="https://github.com" name="github"/>
