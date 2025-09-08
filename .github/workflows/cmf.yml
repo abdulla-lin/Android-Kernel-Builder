@@ -18,11 +18,11 @@ jobs:
             bc bison build-essential cpio curl flex git libssl-dev \
             libncurses5-dev zlib1g-dev libelf-dev dwarves \
             wget unzip xz-utils tar clang lld llvm binutils \
-            python3 python3-pip openjdk-11-jdk
+            python3 python3-pip openjdk-11-jdk realpath
 
       - name: Install Repo Tool
         run: |
-          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
           chmod +x ~/repo
           sudo mv ~/repo /usr/local/bin/
 
@@ -48,15 +48,14 @@ jobs:
 
       - name: Create build.config for Device Modules
         run: |
-          cd kernel_build/kernel_device_modules-6.1
-          cat > build.config <<'EOF'
+          cat > kernel_build/kernel_device_modules-6.1/build.config <<'EOF'
           DEVICE=mt6878
           KERNEL_VERSION=6.1
           ROOT_DIR=$(pwd)
           DEVICE_MODULES_DIR=.
           OUT_DIR=$ROOT_DIR/out/android14-6.1
           EOF
-
+ 
       - name: Build Kernel with Kleaf
         run: |
           cd kernel_build/kernel_device_modules-6.1
@@ -65,11 +64,9 @@ jobs:
       - name: Collect Raw Kernel Artifacts
         run: |
           mkdir -p artifacts
-          shopt -s nullglob
-          for img in kernel_build/out/android14-6.1/dist/Image* kernel_build/out/android14-6.1/dist/*.img; do
-            [ -f "$img" ] && cp "$img" artifacts/
-          done
-          [ -d "kernel_build/out/android14-6.1/dist/modules" ] && cp -r kernel_build/out/android14-6.1/dist/modules artifacts/
+          cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
+          cp kernel_build/out/android14-6.1/dist/*.img artifacts/ || true
+          cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
           cd artifacts && zip -r ../kernel_artifacts.zip *
 
       - name: Upload Raw Kernel Artifacts
@@ -81,10 +78,10 @@ jobs:
       - name: Prepare AnyKernel3
         run: |
           git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-          shopt -s nullglob
-          for img in kernel_build/out/android14-6.1/dist/Image* kernel_build/out/android14-6.1/dist/dtbo.img kernel_build/out/android14-6.1/dist/vendor_dlkm.img kernel_build/out/android14-6.1/dist/system_dlkm.img; do
-            [ -f "$img" ] && cp "$img" AnyKernel3/
-          done
+          cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
 
       - name: Pack AnyKernel3 Flashable ZIP
         run: |
