@@ -63,7 +63,7 @@ jobs:
         zip -r kernel_artifacts.zip artifacts || true
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kernel-artifacts
         path: kernel_build/kernel_artifacts.zip
