@@ -41,6 +41,11 @@ jobs:
         run: |
           git clone --depth=1 -b v1-u https://gitlab.e.foundation/e/devices/android_kernel_nothing_tetris-device_modules.git kernel_build/kernel_device_modules-6.1
 
+      - name: Copy Local Manifest
+        run: |
+          mkdir -p kernel_build/.repo/local_manifests
+          cp kernel_build/kernel_device_modules-6.1/local_manifest.xml kernel_build/.repo/local_manifests/
+
       - name: Create build.config
         run: |
           cat > kernel_build/kernel_device_modules-6.1/build.config <<'EOF'
