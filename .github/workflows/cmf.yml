@@ -55,10 +55,9 @@ jobs:
       - name: Build kernel
         run: |
          cd kernel_build/kernel_device_modules-6.1
-         # Limit parallel jobs to 2 to avoid segfaults on GitHub Actions
-           export MAKEFLAGS="-j2"
-           export CLANG_MAX_JOBS=2
-           bash build.sh
+         export MAKEFLAGS="-j2"       # limit to 2 CPU cores
+         export CLANG_MAX_JOBS=2      # limit clang parallel jobs
+         bash build.sh
 
       # 8️⃣ Collect artifacts
       - name: Collect artifacts
