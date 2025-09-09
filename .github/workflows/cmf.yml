@@ -52,11 +52,13 @@ jobs:
 
           echo "✅ build.config fixed at root and nested folder"
 
-      # 7️⃣ Build kernel
       - name: Build kernel
         run: |
-          cd kernel_build/kernel_device_modules-6.1
-          bash build.sh
+         cd kernel_build/kernel_device_modules-6.1
+         # Limit parallel jobs to 2 to avoid segfaults on GitHub Actions
+           export MAKEFLAGS="-j2"
+           export CLANG_MAX_JOBS=2
+           bash build.sh
 
       # 8️⃣ Collect artifacts
       - name: Collect artifacts
