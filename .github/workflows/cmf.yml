@@ -26,7 +26,7 @@ jobs:
       - name: Clone kernel source
         run: |
           mkdir -p kernel_build
-          git clone --depth=1 -b Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
+          git clone --depth=1 -b tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
 
       # 4️⃣ Clone kernel device modules
       - name: Clone device modules
@@ -38,13 +38,19 @@ jobs:
         run: |
           git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
 
-      # 6️⃣ Fix build.config path exactly for build.sh
-      - name: Fix build.config path
+      # 6️⃣ Fix build.config paths
+      - name: Fix build.config paths
         run: |
           cd kernel_build/kernel_device_modules-6.1
+
+          # Copy build.config to root (for _setup_env.sh)
+          cp build.config.mtk_kernel_device_modules build.config
+
+          # Copy to nested folder (for build.sh)
           mkdir -p kernel_device_modules-6.1
           cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
-          echo "✅ build.config path fixed in nested folder"
+
+          echo "✅ build.config fixed at root and nested folder"
 
       # 7️⃣ Build kernel
       - name: Build kernel
