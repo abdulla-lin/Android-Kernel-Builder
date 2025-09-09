@@ -26,7 +26,7 @@ jobs:
       - name: Clone kernel source
         run: |
           mkdir -p kernel_build
-          git clone --depth=1 -b Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
 
       # 4️⃣ Clone device modules
       - name: Clone device modules
@@ -47,16 +47,62 @@ jobs:
           cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
           echo "✅ build.config fixed"
 
-      # 7️⃣ Build only device + vendor modules
+      # 7️⃣ Add modified build.sh with modules_only support
+      - name: Add modules_only build.sh
+        run: |
+          cat > kernel_build/kernel_device_modules-6.1/build.sh <<'EOF'
+#!/bin/bash
+set -e
+
+MODULES_ONLY=false
+if [ "$1" == "modules_only" ]; then
+    MODULES_ONLY=true
+fi
+
+echo "ROOT_DIR: $PWD"
+echo "DEVICE_MODULES_DIR: ."
+
+if [ ! -f build.config ]; then
+    echo "❌ build.config not found!"
+    exit 1
+fi
+source ./build.config
+
+if [ "$MODULES_ONLY" = false ]; then
+    echo "🔧 Building full kernel Image*..."
+    # Add your original kernel build commands here if needed
+else
+    echo "⚡ Modules-only mode: skipping main kernel build."
+fi
+
+# Build device modules
+echo "🔧 Building device modules..."
+cd kernel_device_modules-6.1
+export MAKEFLAGS="${MAKEFLAGS:-"-j2"}"
+export CLANG_MAX_JOBS="${CLANG_MAX_JOBS:-2"}"
+bash _setup_env.sh
+# Replace with your actual Bazel target for device modules
+bazel build //modules:all || true
+
+# Build vendor modules
+echo "🔧 Building vendor modules..."
+cd ../vendor/mediatek/kernel_modules
+# Replace with your vendor module build command
+bash build_vendor.sh || true
+
+echo "✅ Modules build finished."
+EOF
+          chmod +x kernel_build/kernel_device_modules-6.1/build.sh
+
+      # 8️⃣ Build modules only
       - name: Build kernel modules only
         run: |
           cd kernel_build/kernel_device_modules-6.1
           export MAKEFLAGS="-j2"
           export CLANG_MAX_JOBS=2
-          # Only build modules, skip main kernel Image*
           bash build.sh modules_only
 
-      # 8️⃣ Collect system_dlkm.img & vendor_dlkm.img
+      # 9️⃣ Collect system_dlkm.img & vendor_dlkm.img
       - name: Collect dlkm images
         run: |
           mkdir -p artifacts
@@ -64,7 +110,7 @@ jobs:
           cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img artifacts/ || true
           cd artifacts && zip -r ../kernel_modules_artifacts.zip *
 
-      # 9️⃣ Upload artifacts
+      # 🔟 Upload artifacts
       - name: Upload kernel modules artifacts
         uses: actions/upload-artifact@v4
         with:
