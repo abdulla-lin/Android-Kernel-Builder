@@ -1,4 +1,4 @@
-name: Build Nothing Tetris Kernel Modules Only
+name: Build CMF Phone Modules Only
 
 on:
   workflow_dispatch:
@@ -8,110 +8,69 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout workflow repo
-      - name: Checkout workflow
-        uses: actions/checkout@v4
-
-      # 2️⃣ Install dependencies
+      # 1️⃣ Install dependencies
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             bc bison build-essential cpio curl flex git libssl-dev \
             libncurses5-dev zlib1g-dev libelf-dev dwarves \
-            wget unzip xz-utils tar clang lld llvm binutils \
-            python3 python3-pip openjdk-11-jdk zip
+            wget unzip xz-utils tar clang lld llvm binutils
 
-      # 3️⃣ Clone kernel source
-      - name: Clone kernel source
+      # 2️⃣ Setup LLVM toolchain
+      - name: Setup LLVM toolchain
         run: |
-          mkdir -p kernel_build
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
+          export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CC=clang
+          export LLVM=1
+          export LLVM_IAS=1
+          echo "PATH=$PATH" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LLVM=1" >> $GITHUB_ENV
+          echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-      # 4️⃣ Clone device modules
+      # 3️⃣ Clone device modules only
       - name: Clone device modules
         run: |
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_device_modules-6.1
 
-      # 5️⃣ Clone vendor kernel modules
-      - name: Clone vendor kernel modules
+      # 4️⃣ Clone vendor modules only
+      - name: Clone vendor modules
         run: |
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git vendor/mediatek/kernel_modules
 
-      # 6️⃣ Fix build.config paths
-      - name: Fix build.config paths
+      # 5️⃣ Build device modules
+      - name: Build device modules
         run: |
-          cd kernel_build/kernel_device_modules-6.1
-          cp build.config.mtk_kernel_device_modules build.config
-          mkdir -p kernel_device_modules-6.1
-          cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
-          echo "✅ build.config fixed"
-
-      # 7️⃣ Add modified build.sh with modules_only support
-      - name: Add modules_only build.sh
-        run: |
-          cat > kernel_build/kernel_device_modules-6.1/build.sh <<'EOF'
-#!/bin/bash
-set -e
-
-MODULES_ONLY=false
-if [ "$1" == "modules_only" ]; then
-    MODULES_ONLY=true
-fi
-
-echo "ROOT_DIR: $PWD"
-echo "DEVICE_MODULES_DIR: ."
-
-if [ ! -f build.config ]; then
-    echo "❌ build.config not found!"
-    exit 1
-fi
-source ./build.config
-
-if [ "$MODULES_ONLY" = false ]; then
-    echo "🔧 Building full kernel Image*..."
-    # Add your original kernel build commands here if needed
-else
-    echo "⚡ Modules-only mode: skipping main kernel build."
-fi
-
-# Build device modules
-echo "🔧 Building device modules..."
-cd kernel_device_modules-6.1
-export MAKEFLAGS="${MAKEFLAGS:-"-j2"}"
-export CLANG_MAX_JOBS="${CLANG_MAX_JOBS:-2"}"
-bash _setup_env.sh
-# Replace with your actual Bazel target for device modules
-bazel build //modules:all || true
-
-# Build vendor modules
-echo "🔧 Building vendor modules..."
-cd ../vendor/mediatek/kernel_modules
-# Replace with your vendor module build command
-bash build_vendor.sh || true
-
-echo "✅ Modules build finished."
-EOF
-          chmod +x kernel_build/kernel_device_modules-6.1/build.sh
-
-      # 8️⃣ Build modules only
-      - name: Build kernel modules only
-        run: |
-          cd kernel_build/kernel_device_modules-6.1
+          cd kernel_device_modules-6.1
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
           export MAKEFLAGS="-j2"
-          export CLANG_MAX_JOBS=2
-          bash build.sh modules_only
+          make O=out modules
 
-      # 9️⃣ Collect system_dlkm.img & vendor_dlkm.img
-      - name: Collect dlkm images
+      # 6️⃣ Build vendor modules
+      - name: Build vendor modules
+        run: |
+          cd vendor/mediatek/kernel_modules
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export MAKEFLAGS="-j2"
+          make O=out modules
+
+      # 7️⃣ Collect DLKM images
+      - name: Collect DLKM artifacts
         run: |
           mkdir -p artifacts
-          cp kernel_build/out/android14-6.1/dist/system_dlkm.img artifacts/ || true
-          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img artifacts/ || true
+          cp kernel_device_modules-6.1/out/android14-6.1/dist/system_dlkm.img artifacts/ || true
+          cp vendor/mediatek/kernel_modules/out/android14-6.1/dist/vendor_dlkm.img artifacts/ || true
           cd artifacts && zip -r ../kernel_modules_artifacts.zip *
 
-      # 🔟 Upload artifacts
-      - name: Upload kernel modules artifacts
+      # 8️⃣ Upload artifacts
+      - name: Upload DLKM artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel_modules
