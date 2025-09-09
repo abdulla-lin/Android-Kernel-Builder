@@ -9,7 +9,7 @@ jobs:
 
     steps:
       # -----------------------------
-      # 1️⃣ Checkout this workflow repo
+      # 1️⃣ Checkout workflow repo
       # -----------------------------
       - name: Checkout workflow
         uses: actions/checkout@v4
@@ -27,12 +27,12 @@ jobs:
             python3 python3-pip openjdk-11-jdk zip
 
       # -----------------------------
-      # 3️⃣ Clone kernel source
+      # 3️⃣ Clone forked kernel source
       # -----------------------------
       - name: Clone kernel source
         run: |
           mkdir -p kernel_build
-          git clone --depth=1 https://github.com/NothingOSS/android_kernel_nothing_mt6878.git kernel_build/kernel_source
+          git clone --depth=1 --branch mt6878/Tetris/v https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel_source
 
       # -----------------------------
       # 4️⃣ Clone device modules
