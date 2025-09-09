@@ -49,7 +49,27 @@ jobs:
           git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
 
       # -----------------------------
-      # 6️⃣ Ensure build.config exists
+      # 6️⃣ Clone Kleaf
+      # -----------------------------
+      - name: Clone Kleaf
+        run: |
+          git clone --depth=1 https://github.com/abdulla-lin/kernel-build-bazel_mgk_rules.git kernel_build/build/bazel_mgk_rules
+
+      # -----------------------------
+      # 7️⃣ Setup Kleaf
+      # -----------------------------
+      - name: Setup Kleaf
+        run: |
+          # Copy BUILD.bazel and WORKSPACE
+          cp kernel_build/build/bazel_mgk_rules/BUILD.bazel kernel_build/kernel_device_modules-6.1/BUILD.bazel
+          cp kernel_build/build/bazel_mgk_rules/WORKSPACE kernel_build/kernel_device_modules-6.1/WORKSPACE
+
+          # Copy bazel.sh into tools
+          mkdir -p kernel_build/build/kernel/tools
+          cp kernel_build/build/bazel_mgk_rules/bazel.sh kernel_build/build/kernel/tools/bazel
+
+      # -----------------------------
+      # 8️⃣ Ensure build.config exists
       # -----------------------------
       - name: Ensure build.config
         run: |
@@ -63,7 +83,7 @@ jobs:
           fi
 
       # -----------------------------
-      # 7️⃣ Build kernel (Kleaf)
+      # 9️⃣ Build kernel (Kleaf)
       # -----------------------------
       - name: Build kernel
         run: |
@@ -71,7 +91,7 @@ jobs:
           bash build.sh
 
       # -----------------------------
-      # 8️⃣ Collect artifacts
+      # 🔟 Collect artifacts
       # -----------------------------
       - name: Collect artifacts
         run: |
@@ -82,7 +102,7 @@ jobs:
           cd artifacts && zip -r ../kernel_artifacts.zip *
 
       # -----------------------------
-      # 9️⃣ Upload raw kernel artifacts
+      # 1️⃣1️⃣ Upload raw kernel artifacts
       # -----------------------------
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
@@ -91,7 +111,7 @@ jobs:
           path: kernel_artifacts.zip
 
       # -----------------------------
-      # 🔟 Prepare AnyKernel3 flashable ZIP
+      # 1️⃣2️⃣ Prepare AnyKernel3 flashable ZIP
       # -----------------------------
       - name: Prepare AnyKernel3
         run: |
@@ -102,7 +122,7 @@ jobs:
           cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
 
       # -----------------------------
-      # 1️⃣1️⃣ Pack AnyKernel3 flashable ZIP
+      # 1️⃣3️⃣ Pack AnyKernel3 flashable ZIP
       # -----------------------------
       - name: Pack AnyKernel3 flashable ZIP
         run: |
@@ -110,7 +130,7 @@ jobs:
           zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
 
       # -----------------------------
-      # 1️⃣2️⃣ Upload AnyKernel3 ZIP
+      # 1️⃣4️⃣ Upload AnyKernel3 ZIP
       # -----------------------------
       - name: Upload AnyKernel3 flashable ZIP
         uses: actions/upload-artifact@v4
