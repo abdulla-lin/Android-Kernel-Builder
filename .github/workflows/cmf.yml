@@ -26,7 +26,7 @@ jobs:
       - name: Clone kernel source
         run: |
           mkdir -p kernel_build
-          git clone --depth=1 -b mt6878/Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
+          git clone --depth=1 -b mt6878/Tetris https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
 
       # 4️⃣ Clone kernel device modules
       - name: Clone device modules
