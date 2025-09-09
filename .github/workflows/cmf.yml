@@ -58,7 +58,7 @@ jobs:
             </project>
 
             <!-- Device modules -->
-            <project remote="github" name="abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/v">
+            <project remote="github" name="abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
               <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config"/>
             </project>
 
