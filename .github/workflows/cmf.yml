@@ -56,17 +56,31 @@ jobs:
           git clone --depth=1 https://github.com/abdulla-lin/kernel-build-bazel_mgk_rules.git kernel_build/build/bazel_mgk_rules
 
       # -----------------------------
-      # 7️⃣ Setup Kleaf
+      # 7️⃣ Setup Kleaf safely
       # -----------------------------
       - name: Setup Kleaf
         run: |
-          # Copy BUILD.bazel and WORKSPACE
-          cp kernel_build/build/bazel_mgk_rules/BUILD.bazel kernel_build/kernel_device_modules-6.1/BUILD.bazel
-          cp kernel_build/build/bazel_mgk_rules/WORKSPACE kernel_build/kernel_device_modules-6.1/WORKSPACE
+          # Copy BUILD.bazel if it exists
+          if [ -f kernel_build/build/bazel_mgk_rules/BUILD.bazel ]; then
+            cp kernel_build/build/bazel_mgk_rules/BUILD.bazel kernel_build/kernel_device_modules-6.1/BUILD.bazel
+          else
+            echo "⚠️ BUILD.bazel not found, skipping..."
+          fi
 
-          # Copy bazel.sh into tools
+          # Copy WORKSPACE if it exists
+          if [ -f kernel_build/build/bazel_mgk_rules/WORKSPACE ]; then
+            cp kernel_build/build/bazel_mgk_rules/WORKSPACE kernel_build/kernel_device_modules-6.1/WORKSPACE
+          else
+            echo "⚠️ WORKSPACE not found, skipping..."
+          fi
+
+          # Copy bazel.sh into tools if it exists
           mkdir -p kernel_build/build/kernel/tools
-          cp kernel_build/build/bazel_mgk_rules/bazel.sh kernel_build/build/kernel/tools/bazel
+          if [ -f kernel_build/build/bazel_mgk_rules/bazel.sh ]; then
+            cp kernel_build/build/bazel_mgk_rules/bazel.sh kernel_build/build/kernel/tools/bazel
+          else
+            echo "⚠️ bazel.sh not found, skipping..."
+          fi
 
       # -----------------------------
       # 8️⃣ Ensure build.config exists
