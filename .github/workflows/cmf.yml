@@ -22,66 +22,23 @@ jobs:
             wget unzip xz-utils tar clang lld llvm binutils \
             python3 python3-pip openjdk-11-jdk zip
 
-      # 3️⃣ Install repo tool
-      - name: Install repo
+      # 3️⃣ Clone kernel source
+      - name: Clone kernel source
         run: |
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
-          chmod +x ~/repo
-          sudo mv ~/repo /usr/local/bin/
+          mkdir -p kernel_build
+          git clone --depth=1 -b mt6878/Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
 
-      # 4️⃣ Setup local_manifest.xml
-      - name: Setup local manifest
+      # 4️⃣ Clone kernel device modules
+      - name: Clone device modules
         run: |
-          mkdir -p kernel_build/.repo/local_manifests
-          cat > kernel_build/.repo/local_manifests/local_manifest.xml <<'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <manifest>
-           <remote fetch="https://github.com" name="github"/>
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
 
-          <!-- Remove unused Android Common Kernel projects -->
-          <remove-project name="kernel/common"/>
-          <remove-project name="kernel/common-modules/virtual-device"/>
-
-          <!-- Replace kernel/build with Kleaf rules -->
-          <remove-project name="kernel/build"/>
-          <project path="build/kernel" name="kernel/build">
-          <linkfile src="kleaf/bazel.sh" dest="tools/bazel"/>
-          <linkfile src="build_test.sh" dest="build/build_test.sh"/>
-          <linkfile src="config.sh" dest="build/config.sh"/>
-          </project>
-
-          <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
-          <linkfile src="BUILD.bazel" dest="BUILD"/>
-          <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE"/>
-          </project>
-
-          <!-- Track MediaTek Generic Kernel projects -->
-          <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
-          <linkfile src="build.config.constants" dest="build.config.constants"/>
-          </project>
-
-          <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
-          <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config"/>
-          </project>
-
-          <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
-          </manifest>
-          EOF
-
-      # 5️⃣ Initialize repo
-      - name: Init repo
+      # 5️⃣ Clone vendor kernel modules
+      - name: Clone vendor kernel modules
         run: |
-          cd kernel_build
-          repo init -u https://github.com/NothingOSS/kernel_manifest.git -b common-android14-6.1
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
 
-      # 6️⃣ Sync all repos
-      - name: Repo sync
-        run: |
-          cd kernel_build
-          NUM_CORES=$(nproc)
-          repo sync -c -j$NUM_CORES --fail-fast --force-sync --no-clone-bundle --no-tags
-
-      # 7️⃣ Ensure build.config exists
+      # 6️⃣ Ensure build.config exists
       - name: Ensure build.config
         run: |
           cd kernel_build/kernel_device_modules-6.1
@@ -92,13 +49,13 @@ jobs:
             echo "✅ build.config already exists"
           fi
 
-      # 8️⃣ Build kernel_device_modules-6.1
+      # 7️⃣ Build kernel
       - name: Build kernel
         run: |
           cd kernel_build/kernel_device_modules-6.1
           bash build.sh
 
-      # 9️⃣ Collect kernel artifacts
+      # 8️⃣ Collect artifacts
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
@@ -107,14 +64,14 @@ jobs:
           cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
           cd artifacts && zip -r ../kernel_artifacts.zip *
 
-      # 🔟 Upload kernel artifacts
+      # 9️⃣ Upload kernel artifacts
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel_artifacts
           path: kernel_artifacts.zip
 
-      # 1️⃣1️⃣ Prepare AnyKernel3 flashable ZIP
+      # 🔟 Prepare AnyKernel3 ZIP
       - name: Prepare AnyKernel3
         run: |
           git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
@@ -123,13 +80,13 @@ jobs:
           cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
           cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
 
-      # 1️⃣2️⃣ Pack AnyKernel3 ZIP
+      # 1️⃣1️⃣ Pack AnyKernel3 ZIP
       - name: Pack AnyKernel3 flashable ZIP
         run: |
           cd AnyKernel3
           zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
 
-      # 1️⃣3️⃣ Upload AnyKernel3 ZIP
+      # 1️⃣2️⃣ Upload AnyKernel3 ZIP
       - name: Upload AnyKernel3 ZIP
         uses: actions/upload-artifact@v4
         with:
