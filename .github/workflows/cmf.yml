@@ -36,7 +36,7 @@ jobs:
           sudo mv ~/repo /usr/local/bin/
 
       # -----------------------------
-      # 4️⃣ Create kernel build dir and local manifest
+      # 4️⃣ Setup repo and local manifest
       # -----------------------------
       - name: Setup repo and local manifest
         run: |
@@ -58,7 +58,8 @@ jobs:
           <linkfile src="config.sh" dest="build/config.sh" />
           </project>
           <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
-          <linkfile src="BUILD.bazel" dest="BUILD" />           <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
+          <linkfile src="BUILD.bazel" dest="BUILD" />
+          <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
           </project>
 
           <!-- Track MediaTek Generic Kernel projects -->
@@ -70,7 +71,7 @@ jobs:
           </project>
           <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
           </manifest>
-          EOF
+           EOF
 
       # -----------------------------
       # 5️⃣ Initialize repo
@@ -85,11 +86,25 @@ jobs:
       # -----------------------------
       - name: Repo sync
         run: |
-         cd kernel_build
-         NUM_CORES=$(nproc)
-         repo sync -c -j$NUM_CORES --fail-fast --force-sync --no-clone-bundle --no-tags
+          cd kernel_build
+          NUM_CORES=$(nproc)
+          repo sync -c -j$NUM_CORES --fail-fast --force-sync --no-clone-bundle --no-tags
+
       # -----------------------------
-      # 7️⃣ Build kernel_device_modules-6.1
+      # 7️⃣ Ensure build.config exists
+      # -----------------------------
+      - name: Ensure build.config
+        run: |
+          cd kernel_build/kernel_device_modules-6.1
+          if [ ! -f build.config ]; then
+            cp build.config.mtk_kernel_device_modules build.config
+            echo "✅ build.config created"
+          else
+            echo "✅ build.config already exists"
+          fi
+
+      # -----------------------------
+      # 8️⃣ Build kernel_device_modules-6.1
       # -----------------------------
       - name: Build kernel
         run: |
@@ -97,7 +112,7 @@ jobs:
           bash build.sh
 
       # -----------------------------
-      # 8️⃣ Collect kernel artifacts
+      # 9️⃣ Collect kernel artifacts
       # -----------------------------
       - name: Collect artifacts
         run: |
@@ -108,7 +123,7 @@ jobs:
           cd artifacts && zip -r ../kernel_artifacts.zip *
 
       # -----------------------------
-      # 9️⃣ Upload kernel artifacts
+      # 🔟 Upload kernel artifacts
       # -----------------------------
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
@@ -117,7 +132,7 @@ jobs:
           path: kernel_artifacts.zip
 
       # -----------------------------
-      # 🔟 Prepare AnyKernel3 flashable ZIP
+      # 1️⃣1️⃣ Prepare AnyKernel3 flashable ZIP
       # -----------------------------
       - name: Prepare AnyKernel3
         run: |
@@ -128,7 +143,7 @@ jobs:
           cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
 
       # -----------------------------
-      # 1️⃣1️⃣ Pack AnyKernel3 ZIP
+      # 1️⃣2️⃣ Pack AnyKernel3 ZIP
       # -----------------------------
       - name: Pack AnyKernel3 flashable ZIP
         run: |
@@ -136,7 +151,7 @@ jobs:
           zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
 
       # -----------------------------
-      # 1️⃣2️⃣ Upload AnyKernel3 flashable ZIP
+      # 1️⃣3️⃣ Upload AnyKernel3 ZIP
       # -----------------------------
       - name: Upload AnyKernel3 ZIP
         uses: actions/upload-artifact@v4
