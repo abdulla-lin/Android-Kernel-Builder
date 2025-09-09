@@ -1,77 +1,106 @@
-name: Build CMF Phone Modules Only
+name: Build Kernel + Modules (Tetris-2)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-modules:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Install dependencies
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            bc bison build-essential cpio curl flex git libssl-dev \
-            libncurses5-dev zlib1g-dev libelf-dev dwarves \
-            wget unzip xz-utils tar clang lld llvm binutils
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          bc bison build-essential cpio curl flex git libssl-dev \
+          libncurses5-dev zlib1g-dev libelf-dev dwarves \
+          wget unzip xz-utils tar clang lld llvm binutils python3 zip
 
-      # 2️⃣ Setup LLVM toolchain
-      - name: Setup LLVM toolchain
-        run: |
-          export PATH=$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-17.0.2/bin:$PATH
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CC=clang
-          export LLVM=1
-          export LLVM_IAS=1
-          echo "PATH=$PATH" >> $GITHUB_ENV
-          echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "SUBARCH=arm64" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "LLVM=1" >> $GITHUB_ENV
-          echo "LLVM_IAS=1" >> $GITHUB_ENV
+    - name: Clone kernel source
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+        ref: Tetris-2
+        path: kernel_build/kernel-6.1
 
-      # 3️⃣ Clone device modules only
-      - name: Clone device modules
-        run: |
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_device_modules-6.1
+    - name: Clone device modules
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878
+        ref: mt6878/Tetris/u
+        path: kernel_build/kernel_device_modules-6.1
 
-      # 4️⃣ Clone vendor modules only
-      - name: Clone vendor modules
-        run: |
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git vendor/mediatek/kernel_modules
+    - name: Clone vendor modules
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/android_kernel_modules_nothing_mt6878
+        ref: mt6878/Tetris/u
+        path: kernel_build/vendor/mediatek/kernel_modules
 
-      # 5️⃣ Build device modules
-      - name: Build device modules
-        run: |
-          cd kernel_device_modules-6.1
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export MAKEFLAGS="-j2"
-          make O=out modules
+    - name: Set environment
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CC=clang
+        export LLVM=1
+        export LLVM_IAS=1
+        echo "ARCH=arm64" >> $GITHUB_ENV
+        echo "SUBARCH=arm64" >> $GITHUB_ENV
+        echo "CC=clang" >> $GITHUB_ENV
+        echo "LLVM=1" >> $GITHUB_ENV
+        echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-      # 6️⃣ Build vendor modules
-      - name: Build vendor modules
-        run: |
-          cd vendor/mediatek/kernel_modules
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export MAKEFLAGS="-j2"
-          make O=out modules
+    - name: Configure kernel
+      run: |
+        cd kernel_build/kernel-6.1
+        make O=out gki_defconfig
 
-      # 7️⃣ Collect DLKM images
-      - name: Collect DLKM artifacts
-        run: |
-          mkdir -p artifacts
-          cp kernel_device_modules-6.1/out/android14-6.1/dist/system_dlkm.img artifacts/ || true
-          cp vendor/mediatek/kernel_modules/out/android14-6.1/dist/vendor_dlkm.img artifacts/ || true
-          cd artifacts && zip -r ../kernel_modules_artifacts.zip *
+    - name: Build system modules
+      run: |
+        cd kernel_build/kernel_device_modules-6.1
+        make -j2 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 modules
+        mkdir -p out/modules
+        find out -name "*.ko" -exec cp {} out/modules/ \;
+        cd out
+        zip -r ../../system_dlkm-modules.zip modules
 
-      # 8️⃣ Upload artifacts
-      - name: Upload DLKM artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel_modules
-          path: kernel_modules_artifacts.zip
+    - name: Upload system modules
+      uses: actions/upload-artifact@v4
+      with:
+        name: system_dlkm-modules
+        path: system_dlkm-modules.zip
+
+    - name: Build vendor modules
+      run: |
+        cd kernel_build/vendor/mediatek/kernel_modules
+        make -j2 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 modules
+        mkdir -p out/modules
+        find out -name "*.ko" -exec cp {} out/modules/ \;
+        cd out
+        zip -r ../../vendor_dlkm-modules.zip modules
+
+    - name: Upload vendor modules
+      uses: actions/upload-artifact@v4
+      with:
+        name: vendor_dlkm-modules
+        path: vendor_dlkm-modules.zip
+
+    - name: Build kernel Image + DTBs + DTBO
+      run: |
+        cd kernel_build/kernel-6.1
+        make -j2 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 Image dtbs dtbo.img
+        mkdir -p out/package
+        cp out/arch/arm64/boot/Image out/package/
+        cp out/arch/arm64/boot/dtbo.img out/package/ || true
+        cp -r out/arch/arm64/boot/dts out/package/
+
+    - name: Zip kernel outputs
+      run: |
+        cd kernel_build/kernel-6.1/out
+        zip -r Kernel.zip package
+
+    - name: Upload kernel build
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel
+        path: kernel_build/kernel-6.1/out/Kernel.zip
