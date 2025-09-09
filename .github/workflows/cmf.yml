@@ -6,6 +6,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      NUM_CORES: ${{ runner.os == 'Linux' && github.run_number || 1 }}
 
     steps:
       # -----------------------------
@@ -27,118 +29,78 @@ jobs:
             python3 python3-pip openjdk-11-jdk zip
 
       # -----------------------------
-      # 3️⃣ Cache kernel source
+      # 3️⃣ Install repo tool
       # -----------------------------
-      - name: Cache kernel source
-        uses: actions/cache@v3
-        with:
-          path: kernel_build/kernel_source
-          key: kernel_source-${{ github.sha }}
-
-      # -----------------------------
-      # 4️⃣ Clone kernel source if not cached
-      # -----------------------------
-      - name: Clone kernel source
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Install repo
         run: |
-          mkdir -p kernel_build
-          git clone --depth=1 --branch mt6878/Tetris/v https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel_source
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
+          chmod +x ~/repo
+          sudo mv ~/repo /usr/local/bin/
 
       # -----------------------------
-      # 5️⃣ Cache device modules
+      # 4️⃣ Create kernel build dir and local manifest
       # -----------------------------
-      - name: Cache device modules
-        uses: actions/cache@v3
-        with:
-          path: kernel_build/kernel_device_modules-6.1
-          key: device_modules-${{ github.sha }}
-
-      # -----------------------------
-      # 6️⃣ Clone device modules if not cached
-      # -----------------------------
-      - name: Clone device modules (correct path)
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Setup repo and local manifest
         run: |
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
+          mkdir -p kernel_build/.repo/local_manifests
+          cat > kernel_build/.repo/local_manifests/local_manifest.xml <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote fetch="https://github.com" name="github"/>
+
+  <!-- Remove unused Android Common Kernel projects -->
+  <remove-project name="kernel/common"/>
+  <remove-project name="kernel/common-modules/virtual-device"/>
+
+  <!-- Track MediaTek Generic Kernel bazel rules -->
+  <remove-project name="kernel/build"/>
+  <project path="build/kernel" name="kernel/build" >
+    <linkfile src="kleaf/bazel.sh" dest="tools/bazel" />
+    <linkfile src="build_test.sh" dest="build/build_test.sh" />
+    <linkfile src="config.sh" dest="build/config.sh" />
+  </project>
+  <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
+    <linkfile src="BUILD.bazel" dest="BUILD" />
+    <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
+  </project>
+
+  <!-- Track MediaTek Generic Kernel projects -->
+  <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
+    <linkfile src="build.config.constants" dest="build.config.constants" />
+  </project>
+  <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
+    <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config" />
+  </project>
+  <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
+</manifest>
+EOF
 
       # -----------------------------
-      # 7️⃣ Cache vendor modules
+      # 5️⃣ Initialize repo
       # -----------------------------
-      - name: Cache vendor modules
-        uses: actions/cache@v3
-        with:
-          path: kernel_build/vendor/mediatek/kernel_modules
-          key: vendor_modules-${{ github.sha }}
-
-      # -----------------------------
-      # 8️⃣ Clone vendor modules if not cached
-      # -----------------------------
-      - name: Clone vendor modules
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Init repo
         run: |
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
+          cd kernel_build
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
 
       # -----------------------------
-      # 9️⃣ Cache Kleaf
+      # 6️⃣ Sync all repos
       # -----------------------------
-      - name: Cache Kleaf
-        uses: actions/cache@v3
-        with:
-          path: kernel_build/build/bazel_mgk_rules
-          key: kleaf-${{ github.sha }}
-
-      # -----------------------------
-      # 🔟 Clone Kleaf if not cached
-      # -----------------------------
-      - name: Clone Kleaf
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Repo sync
         run: |
-          git clone --depth=1 https://github.com/abdulla-lin/kernel-build-bazel_mgk_rules.git kernel_build/build/bazel_mgk_rules
+          cd kernel_build
+          repo sync -c -j$NUM_CORES --fail-fast --force-sync --no-clone-bundle --no-tags
 
       # -----------------------------
-      # 1️⃣1️⃣ Setup Kleaf safely
-      # -----------------------------
-      - name: Setup Kleaf
-        run: |
-          if [ -f kernel_build/build/bazel_mgk_rules/BUILD.bazel ]; then
-            cp kernel_build/build/bazel_mgk_rules/BUILD.bazel kernel_build/kernel_device_modules-6.1/BUILD.bazel
-          else
-            echo "⚠️ BUILD.bazel not found, skipping..."
-          fi
-
-          if [ -f kernel_build/build/bazel_mgk_rules/WORKSPACE ]; then
-            cp kernel_build/build/bazel_mgk_rules/WORKSPACE kernel_build/kernel_device_modules-6.1/WORKSPACE
-          else
-            echo "⚠️ WORKSPACE not found, skipping..."
-          fi
-
-          mkdir -p kernel_build/build/kernel/tools
-          if [ -f kernel_build/build/bazel_mgk_rules/bazel.sh ]; then
-            cp kernel_build/build/bazel_mgk_rules/bazel.sh kernel_build/build/kernel/tools/bazel
-          else
-            echo "⚠️ bazel.sh not found, skipping..."
-          fi
-
-      # -----------------------------
-      # 1️⃣2️⃣ Ensure build.config exists
-      # -----------------------------
-      - name: Ensure build.config
-        run: |
-          cd kernel_build/kernel_device_modules-6.1
-          if [ ! -f build.config ]; then
-            cp build.config.mtk_kernel_device_modules build.config
-          fi
-
-      # -----------------------------
-      # 1️⃣3️⃣ Build kernel (Kleaf)
+      # 7️⃣ Build kernel_device_modules-6.1
       # -----------------------------
       - name: Build kernel
         run: |
           cd kernel_build/kernel_device_modules-6.1
-          DEVICE_MODULES_DIR=. bash build.sh
+          bash build.sh
 
       # -----------------------------
-      # 1️⃣4️⃣ Collect artifacts
+      # 8️⃣ Collect kernel artifacts
       # -----------------------------
       - name: Collect artifacts
         run: |
@@ -149,7 +111,7 @@ jobs:
           cd artifacts && zip -r ../kernel_artifacts.zip *
 
       # -----------------------------
-      # 1️⃣5️⃣ Upload kernel artifacts
+      # 9️⃣ Upload kernel artifacts
       # -----------------------------
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
@@ -158,7 +120,7 @@ jobs:
           path: kernel_artifacts.zip
 
       # -----------------------------
-      # 1️⃣6️⃣ Prepare AnyKernel3 flashable ZIP
+      # 🔟 Prepare AnyKernel3 flashable ZIP
       # -----------------------------
       - name: Prepare AnyKernel3
         run: |
@@ -169,7 +131,7 @@ jobs:
           cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
 
       # -----------------------------
-      # 1️⃣7️⃣ Pack AnyKernel3 flashable ZIP
+      # 1️⃣1️⃣ Pack AnyKernel3 ZIP
       # -----------------------------
       - name: Pack AnyKernel3 flashable ZIP
         run: |
@@ -177,9 +139,9 @@ jobs:
           zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
 
       # -----------------------------
-      # 1️⃣8️⃣ Upload AnyKernel3 ZIP
+      # 1️⃣2️⃣ Upload AnyKernel3 flashable ZIP
       # -----------------------------
-      - name: Upload AnyKernel3 flashable ZIP
+      - name: Upload AnyKernel3 ZIP
         uses: actions/upload-artifact@v4
         with:
           name: CMF_Kernel-Flashable-ZIP
