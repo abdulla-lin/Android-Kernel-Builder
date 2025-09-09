@@ -35,11 +35,12 @@ jobs:
           git clone --depth=1 --branch mt6878/Tetris/v https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel_source
 
       # -----------------------------
-      # 4️⃣ Clone device modules
+      # 4️⃣ Clone device modules into nested folder
       # -----------------------------
-      - name: Clone device modules
+      - name: Clone device modules (nested)
         run: |
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
+          mkdir -p kernel_build/kernel_device_modules-6.1
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1/kernel_device_modules-6.1
 
       # -----------------------------
       # 5️⃣ Clone vendor modules
@@ -87,7 +88,7 @@ jobs:
       # -----------------------------
       - name: Ensure build.config
         run: |
-          cd kernel_build/kernel_device_modules-6.1
+          cd kernel_build/kernel_device_modules-6.1/kernel_device_modules-6.1
           if [ ! -f build.config ]; then
             echo "⚠️ build.config missing, creating..."
             cp build.config.mtk_kernel_device_modules build.config
@@ -101,7 +102,7 @@ jobs:
       # -----------------------------
       - name: Build kernel
         run: |
-          cd kernel_build/kernel_device_modules-6.1
+          cd kernel_build/kernel_device_modules-6.1/kernel_device_modules-6.1
           bash build.sh
 
       # -----------------------------
