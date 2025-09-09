@@ -6,8 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      NUM_CORES: ${{ runner.os == 'Linux' && github.run_number || 1 }}
 
     steps:
       # -----------------------------
@@ -87,9 +85,9 @@ jobs:
       # -----------------------------
       - name: Repo sync
         run: |
-          cd kernel_build
-          repo sync -c -j$NUM_CORES --fail-fast --force-sync --no-clone-bundle --no-tags
-
+         cd kernel_build
+         NUM_CORES=$(nproc)
+         repo sync -c -j$NUM_CORES --fail-fast --force-sync --no-clone-bundle --no-tags
       # -----------------------------
       # 7️⃣ Build kernel_device_modules-6.1
       # -----------------------------
