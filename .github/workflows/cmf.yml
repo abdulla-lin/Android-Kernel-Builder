@@ -40,36 +40,37 @@ jobs:
           <manifest>
             <remote fetch="https://github.com" name="github"/>
 
-            <!-- Remove unused Android Common Kernel projects -->
-            <remove-project name="kernel/common"/>
+            <!-- Remove unused AOSP repos -->
             <remove-project name="kernel/common-modules/virtual-device"/>
             <remove-project name="kernel/build"/>
 
-            <!-- Bazel rules (Kleaf) -->
+            <!-- Kleaf / Bazel rules -->
             <project remote="github" name="abdulla-lin/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="main">
               <linkfile src="BUILD.bazel" dest="BUILD"/>
               <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE"/>
             </project>
 
-            <!-- Main kernel -->
-            <project remote="github" name="abdulla-lin/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="Tetris-2">
-              <linkfile src="build.config.constants" dest="build.config.constants"/>
+            <!-- Replace kernel/build with Kleaf -->
+            <project path="build/kernel" name="kernel/build">
+              <linkfile src="kleaf/bazel.sh" dest="tools/bazel"/>
+              <linkfile src="build_test.sh" dest="build/build_test.sh"/>
+              <linkfile src="config.sh" dest="build/config.sh"/>
             </project>
 
             <!-- Device modules -->
-            <project remote="github" name="abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="Tetris-2">
+            <project remote="github" name="abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/v">
               <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config"/>
             </project>
 
             <!-- Vendor kernel modules -->
-            <project remote="github" name="abdulla-lin/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="Tetris-2"/>
+            <project remote="github" name="abdulla-lin/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/v"/>
           </manifest>
           EOF
 
       - name: Repo sync
         run: |
           cd kernel_build
-          repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
+          repo sync -c -j1 --fail-fast --force-sync --no-clone-bundle --no-tags
 
       - name: Fix build.config for modules
         run: |
@@ -78,9 +79,9 @@ jobs:
             echo "⚠️ build.config not found, fixing..."
             if [ -f build.config.mtk_kernel_device_modules ]; then
               cp build.config.mtk_kernel_device_modules build.config
-              echo "✅ build.config created from build.config.mtk_kernel_device_modules"
+              echo "✅ build.config created"
             else
-              echo "❌ build.config.mtk_kernel_device_modules missing too!"
+              echo "❌ build.config.mtk_kernel_device_modules missing!"
               exit 1
             fi
           else
