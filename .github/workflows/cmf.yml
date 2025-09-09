@@ -46,7 +46,7 @@ jobs:
             <remove-project name="kernel/build"/>
 
             <!-- Bazel rules (Kleaf) -->
-            <project remote="github" name="abdulla-lin/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
+            <project remote="github" name="abdulla-lin/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="main">
               <linkfile src="BUILD.bazel" dest="BUILD"/>
               <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE"/>
             </project>
