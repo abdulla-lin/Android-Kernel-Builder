@@ -1,4 +1,4 @@
-name: Build Kernel + Device Modules (Tetris)
+name: Build Device Modules + Kernel (Tetris)
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: Tetris-2
+        ref: mt6878/Tetris-2
         path: kernel_src
 
     - name: Checkout Device Modules
@@ -30,12 +30,12 @@ jobs:
           libncurses5-dev zlib1g-dev libelf-dev dwarves \
           wget unzip xz-utils tar clang lld llvm binutils python3
 
-          - name: Build Device Modules
-            run: |
-            cd kernel_device_modules-6.1
-            export ROOT_DIR=$GITHUB_WORKSPACE/kernel_src
-            export DEVICE_MODULES_DIR=$PWD
-            bash build.sh
+    - name: Build Device Modules
+      run: |
+        cd kernel_device_modules-6.1
+        export ROOT_DIR=$GITHUB_WORKSPACE/kernel_src
+        export DEVICE_MODULES_DIR=$PWD
+        bash build.sh
 
     - name: Build Kernel (GKI)
       run: |
@@ -49,12 +49,12 @@ jobs:
         mkdir -p artifacts
         cp kernel_src/out/arch/arm64/boot/Image* artifacts/ || true
         cp kernel_src/out/arch/arm64/boot/dtbo.img artifacts/ || true
-        cp -r kernel_src/out/modules artifacts/ || true
+        cp -r kernel_src/out/modules artifacts/kernel_modules || true
         cp -r kernel_device_modules-6.1/out artifacts/device_modules || true
-        cd artifacts && zip -r ../kernel_modules_build.zip *
+        cd artifacts && zip -r ../kernel_build_full.zip *
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel_modules_build
-        path: kernel_modules_build.zip
+        name: kernel_build_full
+        path: kernel_build_full.zip
