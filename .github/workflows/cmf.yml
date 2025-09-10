@@ -12,7 +12,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: mt6878/Tetris-2
+        ref: Tetris-2
         path: kernel_src
 
     - name: Checkout Device Modules
