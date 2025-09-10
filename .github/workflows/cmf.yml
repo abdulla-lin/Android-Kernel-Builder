@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04   # lighter than ubuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
       # 1️⃣ Checkout workflow repo
@@ -28,13 +28,13 @@ jobs:
           mkdir -p kernel_build
           git clone --depth=1 -b Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
 
-      # 4️⃣ Clone kernel device modules
+      # 4️⃣ Clone device modules
       - name: Clone device modules
         run: |
           git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
 
-      # 5️⃣ Clone vendor kernel modules
-      - name: Clone vendor kernel modules
+      # 5️⃣ Clone vendor modules
+      - name: Clone vendor modules
         run: |
           git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
 
@@ -45,32 +45,32 @@ jobs:
           cp build.config.mtk_kernel_device_modules build.config
           mkdir -p kernel_device_modules-6.1
           cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
-          echo "✅ build.config fixed at root and nested folder"
+          echo "✅ build.config fixed"
 
-      # 7️⃣ Add swap + build kernel & modules with memory limits
-      - name: Build kernel
+      # 7️⃣ Build kernel + modules with Bazel (skip build.sh)
+      - name: Build kernel + modules
         run: |
           cd kernel_build/kernel_device_modules-6.1
-          # Add swap (6GB)
-          sudo fallocate -l 6G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
-          # Limit parallel jobs
-          export MAKEFLAGS="-j2"
-          export CLANG_MAX_JOBS=2
-          export BAZEL_JOBS=2
-          export BAZEL_OPTS="--jobs=2 --local_ram_resources=4096"
-          bash build.sh
+          export BAZEL_OPTS="--jobs=1 --local_ram_resources=2048 --local_cpu_resources=1 --spawn_strategy=local --noexperimental_multi_threaded_digest"
+
+          # Kernel image
+          tools/bazel build //common:kernel_aarch64 $BAZEL_OPTS
+
+          # Device + vendor modules
+          tools/bazel build //common-modules/... $BAZEL_OPTS
+
+          # Collect outputs
+          mkdir -p ../../out
+          cp bazel-bin/common/kernel_aarch64/Image* ../../out/ || true
+          find bazel-bin/common-modules/ -name "*.ko" -exec cp {} ../../out/ \;
 
       # 8️⃣ Collect artifacts
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
           cp kernel_build/out/android14-6.1/dist/*.img artifacts/ || true
-          cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
+          cp kernel_build/out/android14-6.1/dist/modules/* artifacts/ || true
+          cp out/* artifacts/ || true
           cd artifacts && zip -r ../kernel_artifacts.zip *
 
       # 9️⃣ Upload kernel artifacts
@@ -84,12 +84,15 @@ jobs:
       - name: Prepare AnyKernel3
         run: |
           git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-          cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
+          cp out/Image* AnyKernel3/ || true
           cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
           cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
           cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
+          # Add .ko modules
+          mkdir -p AnyKernel3/modules
+          cp out/*.ko AnyKernel3/modules/ || true
 
-      # 1️⃣1️⃣ Pack AnyKernel3 ZIP
+      # 1️⃣1️⃣ Pack AnyKernel3 flashable ZIP
       - name: Pack AnyKernel3 flashable ZIP
         run: |
           cd AnyKernel3
