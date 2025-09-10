@@ -1,10 +1,10 @@
-name: Build Nothing Tetris Kernel (Kleaf)
+name: Build Tetris Modules First
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-modules:
     runs-on: ubuntu-latest
 
     steps:
@@ -45,62 +45,28 @@ jobs:
           cp build.config.mtk_kernel_device_modules build.config
           mkdir -p kernel_device_modules-6.1
           cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
-          echo "✅ build.config fixed"
 
-      # 7️⃣ Build kernel + modules with Bazel (skip build.sh)
-      - name: Build kernel + modules
+      # 7️⃣ Build **modules only**
+      - name: Build modules only
         run: |
           cd kernel_build/kernel_device_modules-6.1
-          export BAZEL_OPTS="--jobs=1 --local_ram_resources=2048 --local_cpu_resources=1 --spawn_strategy=local --noexperimental_multi_threaded_digest"
+          export MAKEFLAGS="-j2"
+          export CLANG_MAX_JOBS=2
+          export MODULES_ONLY=1   # ⚡ only build system_dlkm + vendor_dlkm
+          bash build.sh
 
-          # Kernel image
-          tools/bazel build //common:kernel_aarch64 $BAZEL_OPTS
-
-          # Device + vendor modules
-          tools/bazel build //common-modules/... $BAZEL_OPTS
-
-          # Collect outputs
-          mkdir -p ../../out
-          cp bazel-bin/common/kernel_aarch64/Image* ../../out/ || true
-          find bazel-bin/common-modules/ -name "*.ko" -exec cp {} ../../out/ \;
-
-      # 8️⃣ Collect artifacts
-      - name: Collect artifacts
+      # 8️⃣ Collect modules
+      - name: Collect modules
         run: |
           mkdir -p artifacts
-          cp kernel_build/out/android14-6.1/dist/*.img artifacts/ || true
-          cp kernel_build/out/android14-6.1/dist/modules/* artifacts/ || true
-          cp out/* artifacts/ || true
-          cd artifacts && zip -r ../kernel_artifacts.zip *
+          cp kernel_build/out/android14-6.1/dist/system_dlkm.img artifacts/ || true
+          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img artifacts/ || true
+          cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
+          cd artifacts && zip -r ../modules_artifacts.zip *
 
-      # 9️⃣ Upload kernel artifacts
-      - name: Upload kernel artifacts
+      # 9️⃣ Upload artifacts
+      - name: Upload modules
         uses: actions/upload-artifact@v4
         with:
-          name: kernel_artifacts
-          path: kernel_artifacts.zip
-
-      # 🔟 Prepare AnyKernel3 ZIP
-      - name: Prepare AnyKernel3
-        run: |
-          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-          cp out/Image* AnyKernel3/ || true
-          cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
-          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
-          cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
-          # Add .ko modules
-          mkdir -p AnyKernel3/modules
-          cp out/*.ko AnyKernel3/modules/ || true
-
-      # 1️⃣1️⃣ Pack AnyKernel3 flashable ZIP
-      - name: Pack AnyKernel3 flashable ZIP
-        run: |
-          cd AnyKernel3
-          zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
-
-      # 1️⃣2️⃣ Upload AnyKernel3 ZIP
-      - name: Upload AnyKernel3 ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: CMF_Kernel-Flashable-ZIP
-          path: CMF_Kernel-6.1-*.zip
+          name: tetris_modules
+          path: modules_artifacts.zip
