@@ -1,4 +1,4 @@
-name: Build Kernel + Modules
+name: Kernel + Modules Build
 
 on:
   workflow_dispatch:
@@ -8,68 +8,79 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Checkout Android Kernel Builder
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/Android-Kernel-Builder
+        path: Android-Kernel-Builder
+
     - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
         ref: Tetris-2
-        path: kernel_src
+        path: Android-Kernel-Builder/kernel_src
 
     - name: Checkout Device Modules
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878
-        ref: mt6878/Tetris/u
-        path: kernel_device_modules-6.1
+        ref: mt6878/not-v
+        path: Android-Kernel-Builder/kernel_device_modules-6.1
 
-    - name: Install Dependencies
+    - name: Checkout Vendor Modules
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/android_vendor_mediatek_kernel_modules
+        ref: mt6878
+        path: Android-Kernel-Builder/vendor/mediatek/kernel_modules
+
+    - name: Setup Clang & LLVM
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          bc bison build-essential cpio curl flex git libssl-dev \
-          libncurses5-dev zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar clang lld llvm binutils
+        sudo apt-get install -y clang llvm lld bc flex bison libssl-dev
 
-    - name: Build Modules (system_dlkm + vendor_dlkm)
+    - name: Kernel defconfig + prepare
       run: |
+        cd Android-Kernel-Builder
         mkdir -p out
+        make -C kernel_src O=out ARCH=arm64 \
+          CC=clang LLVM=1 LLVM_IAS=1 \
+          vendor/tetris_defconfig
+        make -C kernel_src O=out ARCH=arm64 \
+          CC=clang LLVM=1 LLVM_IAS=1 prepare
+
+    - name: Build device modules
+      run: |
+        cd Android-Kernel-Builder
         make -C kernel_src \
           O=out ARCH=arm64 \
           CC=clang LLVM=1 LLVM_IAS=1 \
-          M=kernel_device_modules-6.1 \
+          M=../kernel_device_modules-6.1 \
           modules
 
-    - name: Build Kernel + DTBs
+    - name: Build vendor modules
       run: |
-        export KCFLAGS="-O3"
+        cd Android-Kernel-Builder
         make -C kernel_src \
           O=out ARCH=arm64 \
-          CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS" \
-          -j$(nproc)
-        make -C kernel_src \
-          O=out ARCH=arm64 \
-          dtbs CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
+          CC=clang LLVM=1 LLVM_IAS=1 \
+          M=vendor/mediatek/kernel_modules \
+          modules
 
-    - name: Prepare AnyKernel3
+    - name: Collect modules
       run: |
-        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-        cp out/arch/arm64/boot/Image AnyKernel3/Image
-        cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ || true
-        if [ -f out/arch/arm64/boot/dtbo.img ]; then
-          cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
-        fi
-        # Copy built modules
-        mkdir -p AnyKernel3/modules/system_dlkm
-        mkdir -p AnyKernel3/modules/vendor_dlkm
-        find out -name "*.ko" -exec cp {} AnyKernel3/modules/system_dlkm/ \;
+        cd Android-Kernel-Builder
+        mkdir -p out/modules
+        find out -name "*.ko" -exec cp {} out/modules/ \;
 
-    - name: Pack Flashable ZIP
+    - name: Zip modules
       run: |
-        cd AnyKernel3
-        zip -r9 ../Kernel_Modules_Build.zip *
+        cd Android-Kernel-Builder/out
+        zip -r9 modules.zip modules
 
-    - name: Upload Artifact
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel_Modules_Build
-        path: Kernel_Modules_Build.zip
+        name: kernel-modules
+        path: Android-Kernel-Builder/out/modules.zip
