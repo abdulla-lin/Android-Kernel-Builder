@@ -1,10 +1,10 @@
-name: Build Tetris Modules First
+name: Build Nothing Tetris Kernel (Kleaf)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-modules:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,51 +22,94 @@ jobs:
             wget unzip xz-utils tar clang lld llvm binutils \
             python3 python3-pip openjdk-11-jdk zip
 
-      # 3️⃣ Clone kernel source
+      # 3️⃣ Add swap to avoid OOM
+      - name: Add extra swap
+        run: |
+          sudo fallocate -l 6G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      # 4️⃣ Clone kernel source
       - name: Clone kernel source
         run: |
           mkdir -p kernel_build
           git clone --depth=1 -b Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
 
-      # 4️⃣ Clone device modules
+      # 5️⃣ Clone kernel device modules
       - name: Clone device modules
         run: |
           git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
 
-      # 5️⃣ Clone vendor modules
-      - name: Clone vendor modules
+      # 6️⃣ Clone vendor kernel modules
+      - name: Clone vendor kernel modules
         run: |
           git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
 
-      # 6️⃣ Fix build.config paths
+      # 7️⃣ Fix build.config paths
       - name: Fix build.config paths
         run: |
           cd kernel_build/kernel_device_modules-6.1
           cp build.config.mtk_kernel_device_modules build.config
           mkdir -p kernel_device_modules-6.1
           cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
+          echo "✅ build.config fixed"
 
-      # 7️⃣ Build **modules only**
-      - name: Build modules only
+      # 8️⃣ Build device modules (system_dlkm + vendor_dlkm)
+      - name: Build device modules
         run: |
           cd kernel_build/kernel_device_modules-6.1
           export MAKEFLAGS="-j2"
           export CLANG_MAX_JOBS=2
-          export MODULES_ONLY=1   # ⚡ only build system_dlkm + vendor_dlkm
-          bash build.sh
+          export BAZEL_BUILD_OPTS="--jobs=2 --local_ram_resources=2048 --local_cpu_resources=2"
+          tools/bazel clean --expunge || true
+          tools/bazel build //common:system_dlkm_dist $BAZEL_BUILD_OPTS
+          tools/bazel build //common:vendor_dlkm_dist $BAZEL_BUILD_OPTS
 
-      # 8️⃣ Collect modules
-      - name: Collect modules
+      # 9️⃣ Build kernel
+      - name: Build kernel
+        run: |
+          cd kernel_build/kernel_device_modules-6.1
+          export MAKEFLAGS="-j2"
+          export CLANG_MAX_JOBS=2
+          export BAZEL_BUILD_OPTS="--jobs=2 --local_ram_resources=2048 --local_cpu_resources=2"
+          tools/bazel build //common:kernel_dist $BAZEL_BUILD_OPTS
+
+      # 🔟 Collect artifacts
+      - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          cp kernel_build/out/android14-6.1/dist/system_dlkm.img artifacts/ || true
-          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img artifacts/ || true
+          cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
+          cp kernel_build/out/android14-6.1/dist/*.img artifacts/ || true
           cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
-          cd artifacts && zip -r ../modules_artifacts.zip *
+          cd artifacts && zip -r ../kernel_artifacts.zip *
 
-      # 9️⃣ Upload artifacts
-      - name: Upload modules
+      # 1️⃣1️⃣ Upload kernel artifacts
+      - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tetris_modules
-          path: modules_artifacts.zip
+          name: kernel_artifacts
+          path: kernel_artifacts.zip
+
+      # 1️⃣2️⃣ Prepare AnyKernel3 ZIP
+      - name: Prepare AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
+          cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
+
+      # 1️⃣3️⃣ Pack AnyKernel3 flashable ZIP
+      - name: Pack AnyKernel3 flashable ZIP
+        run: |
+          cd AnyKernel3
+          zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
+
+      # 1️⃣4️⃣ Upload AnyKernel3 ZIP
+      - name: Upload AnyKernel3 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: CMF_Kernel-Flashable-ZIP
+          path: CMF_Kernel-6.1-*.zip
