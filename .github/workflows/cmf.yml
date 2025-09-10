@@ -1,4 +1,4 @@
-name: Kernel + Modules Build
+name: Build Kernel + Device Modules (Tetris)
 
 on:
   workflow_dispatch:
@@ -8,79 +8,53 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Android Kernel Builder
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/Android-Kernel-Builder
-        path: Android-Kernel-Builder
-
     - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: Tetris-2
-        path: Android-Kernel-Builder/kernel_src
+        ref: mt6878/Tetris-2
+        path: kernel_src
 
     - name: Checkout Device Modules
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878
         ref: mt6878/Tetris/u
-        path: Android-Kernel-Builder/kernel_device_modules-6.1
+        path: kernel_device_modules-6.1
 
-    - name: Checkout vendor modules
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_modules_nothing_mt6878
-        ref: mt6878/Tetris/u
-        path: vendor_modules
-
-    - name: Setup Clang & LLVM
+    - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y clang llvm lld bc flex bison libssl-dev
+        sudo apt-get install -y \
+          bc bison build-essential cpio curl flex git libssl-dev \
+          libncurses5-dev zlib1g-dev libelf-dev dwarves \
+          wget unzip xz-utils tar clang lld llvm binutils python3
 
-    - name: Kernel defconfig + prepare
+    - name: Build Kernel (GKI)
       run: |
-        cd Android-Kernel-Builder
+        cd kernel_src
         mkdir -p out
-        make -C kernel_src O=out ARCH=arm64 \
-          CC=clang LLVM=1 LLVM_IAS=1 \
-          vendor/tetris_defconfig
-        make -C kernel_src O=out ARCH=arm64 \
-          CC=clang LLVM=1 LLVM_IAS=1 prepare
+        make O=out ARCH=arm64 gki_defconfig
+        make -j$(nproc) O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
 
-    - name: Build device modules
+    - name: Build Device Modules
       run: |
-        cd Android-Kernel-Builder
-        make -C kernel_src \
-          O=out ARCH=arm64 \
-          CC=clang LLVM=1 LLVM_IAS=1 \
-          M=../kernel_device_modules-6.1 \
-          modules
+        cd kernel_device_modules-6.1
+        export ROOT_DIR=$GITHUB_WORKSPACE/kernel_src
+        export DEVICE_MODULES_DIR=$PWD
+        bash build.sh
 
-    - name: Build vendor modules
+    - name: Collect artifacts
       run: |
-        cd Android-Kernel-Builder
-        make -C kernel_src \
-          O=out ARCH=arm64 \
-          CC=clang LLVM=1 LLVM_IAS=1 \
-          M=vendor_modules \
-          modules
+        mkdir -p artifacts
+        cp kernel_src/out/arch/arm64/boot/Image* artifacts/ || true
+        cp kernel_src/out/arch/arm64/boot/dtbo.img artifacts/ || true
+        cp -r kernel_src/out/modules artifacts/ || true
+        cp -r kernel_device_modules-6.1/out artifacts/device_modules || true
+        cd artifacts && zip -r ../kernel_modules_build.zip *
 
-    - name: Collect modules
-      run: |
-        cd Android-Kernel-Builder
-        mkdir -p out/modules
-        find out -name "*.ko" -exec cp {} out/modules/ \;
-
-    - name: Zip modules
-      run: |
-        cd Android-Kernel-Builder/out
-        zip -r9 modules.zip modules
-
-    - name: Upload artifact
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-modules
-        path: Android-Kernel-Builder/out/modules.zip
+        name: kernel_modules_build
+        path: kernel_modules_build.zip
