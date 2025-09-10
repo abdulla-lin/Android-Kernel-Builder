@@ -32,10 +32,11 @@ jobs:
 
     - name: Build Device Modules
       run: |
-        cd kernel_device_modules-6.1
-        export ROOT_DIR=$GITHUB_WORKSPACE/kernel_src
-        export DEVICE_MODULES_DIR=$PWD
-        bash build.sh
+       cd kernel_src
+       make O=out ARCH=arm64 vendor/tetris_defconfig
+       make O=out ARCH=arm64 modules_prepare
+       cd ../kernel_device_modules-6.1
+       make -C ../kernel_src O=../kernel_src/out M=$PWD modules
 
     - name: Build Kernel (GKI)
       run: |
