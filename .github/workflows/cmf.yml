@@ -25,14 +25,14 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878
-        ref: mt6878/not-v
+        ref: mt6878/Tetris/u
         path: Android-Kernel-Builder/kernel_device_modules-6.1
 
     - name: Checkout Vendor Modules
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/android_vendor_mediatek_kernel_modules
-        ref: mt6878
+        ref: mt6878/Tetris/u
         path: Android-Kernel-Builder/vendor/mediatek/kernel_modules
 
     - name: Setup Clang & LLVM
