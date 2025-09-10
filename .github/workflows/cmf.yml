@@ -1,4 +1,4 @@
-name: Build Kernel + Modules (Tetris-2)
+name: Build Kernel + Modules
 
 on:
   workflow_dispatch:
@@ -8,99 +8,68 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Install dependencies
+    - name: Checkout Kernel Source
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
+        ref: mt6878/Tetris-2
+        path: kernel_src
+
+    - name: Checkout Device Modules
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878
+        ref: mt6878/Tetris/u
+        path: kernel_device_modules-6.1
+
+    - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           bc bison build-essential cpio curl flex git libssl-dev \
           libncurses5-dev zlib1g-dev libelf-dev dwarves \
-          wget unzip xz-utils tar clang lld llvm binutils python3 zip
+          wget unzip xz-utils tar clang lld llvm binutils
 
-    - name: Clone kernel source
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_6.1_nothing_mt6878
-        ref: Tetris-2
-        path: kernel_build/kernel-6.1
-
-    - name: Clone device modules
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878
-        ref: mt6878/Tetris/u
-        path: kernel_build/kernel_device_modules-6.1
-
-    - name: Clone vendor modules
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/android_kernel_modules_nothing_mt6878
-        ref: mt6878/Tetris/u
-        path: kernel_build/vendor/mediatek/kernel_modules
-
-    - name: Set environment
+    - name: Build Modules (system_dlkm + vendor_dlkm)
       run: |
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CC=clang
-        export LLVM=1
-        export LLVM_IAS=1
-        echo "ARCH=arm64" >> $GITHUB_ENV
-        echo "SUBARCH=arm64" >> $GITHUB_ENV
-        echo "CC=clang" >> $GITHUB_ENV
-        echo "LLVM=1" >> $GITHUB_ENV
-        echo "LLVM_IAS=1" >> $GITHUB_ENV
+        mkdir -p out
+        make -C kernel_src \
+          O=out ARCH=arm64 \
+          CC=clang LLVM=1 LLVM_IAS=1 \
+          M=kernel_device_modules-6.1 \
+          modules
 
-    - name: Configure kernel
+    - name: Build Kernel + DTBs
       run: |
-        cd kernel_build/kernel-6.1
-        make O=out gki_defconfig
+        export KCFLAGS="-O3"
+        make -C kernel_src \
+          O=out ARCH=arm64 \
+          CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS" \
+          -j$(nproc)
+        make -C kernel_src \
+          O=out ARCH=arm64 \
+          dtbs CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="$KCFLAGS"
 
-    - name: Build system modules
+    - name: Prepare AnyKernel3
       run: |
-        cd kernel_build/kernel_device_modules-6.1
-        make -j2 modules
-        mkdir -p out/modules
-        find . -name "*.ko" -exec cp {} out/modules/ \;
-        cd out
-        zip -r ../../system_dlkm-modules.zip modules
+        git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
+        cp out/arch/arm64/boot/Image AnyKernel3/Image
+        cp out/arch/arm64/boot/dts/**/*.dtb AnyKernel3/ || true
+        if [ -f out/arch/arm64/boot/dtbo.img ]; then
+          cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+        fi
+        # Copy built modules
+        mkdir -p AnyKernel3/modules/system_dlkm
+        mkdir -p AnyKernel3/modules/vendor_dlkm
+        find out -name "*.ko" -exec cp {} AnyKernel3/modules/system_dlkm/ \;
 
-    - name: Upload system modules
+    - name: Pack Flashable ZIP
+      run: |
+        cd AnyKernel3
+        zip -r9 ../Kernel_Modules_Build.zip *
+
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: system_dlkm-modules
-        path: system_dlkm-modules.zip
-
-    - name: Build vendor modules
-      run: |
-        cd kernel_build/vendor/mediatek/kernel_modules
-        make -j2 modules
-        mkdir -p out/modules
-        find . -name "*.ko" -exec cp {} out/modules/ \;
-        cd out
-        zip -r ../../vendor_dlkm-modules.zip modules
-
-    - name: Upload vendor modules
-      uses: actions/upload-artifact@v4
-      with:
-        name: vendor_dlkm-modules
-        path: vendor_dlkm-modules.zip
-
-    - name: Build kernel Image + DTBs + DTBO
-      run: |
-        cd kernel_build/kernel-6.1
-        make -j2 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 Image dtbs dtbo.img
-        mkdir -p out/package
-        cp out/arch/arm64/boot/Image out/package/
-        cp out/arch/arm64/boot/dtbo.img out/package/ || true
-        cp -r out/arch/arm64/boot/dts out/package/
-
-    - name: Zip kernel outputs
-      run: |
-        cd kernel_build/kernel-6.1/out
-        zip -r Kernel.zip package
-
-    - name: Upload kernel build
-      uses: actions/upload-artifact@v4
-      with:
-        name: Kernel
-        path: kernel_build/kernel-6.1/out/Kernel.zip
+        name: Kernel_Modules_Build
+        path: Kernel_Modules_Build.zip
