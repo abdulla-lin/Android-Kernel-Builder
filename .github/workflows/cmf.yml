@@ -58,9 +58,9 @@ jobs:
     - name: Build system modules
       run: |
         cd kernel_build/kernel_device_modules-6.1
-        make -j2 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 modules
+        make -j2 modules
         mkdir -p out/modules
-        find out -name "*.ko" -exec cp {} out/modules/ \;
+        find . -name "*.ko" -exec cp {} out/modules/ \;
         cd out
         zip -r ../../system_dlkm-modules.zip modules
 
@@ -73,9 +73,9 @@ jobs:
     - name: Build vendor modules
       run: |
         cd kernel_build/vendor/mediatek/kernel_modules
-        make -j2 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 modules
+        make -j2 modules
         mkdir -p out/modules
-        find out -name "*.ko" -exec cp {} out/modules/ \;
+        find . -name "*.ko" -exec cp {} out/modules/ \;
         cd out
         zip -r ../../vendor_dlkm-modules.zip modules
 
