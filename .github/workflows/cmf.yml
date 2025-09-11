@@ -1,6 +1,4 @@
-# .github/workflows/build_tetris.yml
-
-name: Build Fenrir for CMF Phone 1 (Tetris)
+name: Build fenrir exploit (tetris)
 
 on:
   workflow_dispatch:
@@ -8,9 +6,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout abdulla-lin/fenrir (main)
+    - name: Checkout repo
       uses: actions/checkout@v4
       with:
         repository: abdulla-lin/fenrir
@@ -19,23 +16,46 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential wget python3 unzip
+        sudo apt-get install -y build-essential wget python3 unzip binutils
 
-    - name: Download lk.img
+    - name: Download lk.img and rename to bin/tetris.bin
       run: |
-        mkdir -p bin
-        # Direct-download from Google Drive using the "uc?export=download&id=..." form
-        wget --no-check-certificate "https://drive.google.com/uc?export=download&id=1ZuX0hBB9fSZ7I7tDj3l0n1qrM1-KzUa1" -O bin/tetris.bin
+        mkdir -p bin devices artifacts
+        FILEID="1ZuX0hBB9fSZ7I7tDj3l0n1qrM1-KzUa1"
+        CONFIRM=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate \
+          "https://drive.google.com/uc?export=download&id=${FILEID}" -O- | \
+          sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p')
+        wget --load-cookies /tmp/cookies.txt \
+          "https://drive.google.com/uc?export=download&confirm=${CONFIRM}&id=${FILEID}" \
+          -O bin/tetris.bin
+        ls -lh bin/tetris.bin
 
-    - name: Make build script executable
-      run: chmod +x build.sh
+    - name: Create tetris.json device config
+      run: |
+        cat > devices/tetris.json <<'EOF'
+        {
+          "codename": "tetris",
+          "bl2_ext_base": "0xFFFF000050700000",
+          "bl2_ext_size": "0x01000000",
+          "notes": "CMF Phone 1 (tetris). 16MB LK at 0xFFFF000050700000."
+        }
+        EOF
+        cat devices/tetris.json
 
-    - name: Build for tetris
-      run: ./build.sh tetris
+    - name: Build exploit for tetris
+      run: |
+        chmod +x build.sh
+        ./build.sh tetris
 
-    - name: Upload patched bootloader artifact
+    - name: Collect artifacts
+      run: |
+        mkdir -p artifacts
+        cp -av out/* artifacts/ || true
+        cp -av build/tetris/stage3/payload.elf artifacts/ || true
+        cp -av devices/tetris.json artifacts/ || true
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: fenrir_tetris_patched
-        path: out/*
+        name: fenrir-tetris-build
+        path: artifacts/**
         
