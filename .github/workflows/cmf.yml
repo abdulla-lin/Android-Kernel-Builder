@@ -1,4 +1,4 @@
-name: Build fenrir (tetris) with pre-check
+name: Build fenrir (tetris) with diagnostic pre-check
 
 on:
   workflow_dispatch:
@@ -30,32 +30,34 @@ jobs:
             -O bin/tetris.bin
           ls -lh bin/tetris.bin
 
-      - name: Pre-check:convert JSON hex strings to numbers
+      - name: Diagnostic:dump Fenrir memory range
         run: |
-          # Read hex strings from JSON
-          JSON_BASE_STR=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_base'])")
-          JSON_SIZE_STR=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_size'])")
+          # Read JSON values
+          JSON_BASE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_base'])")
+          JSON_SIZE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_size'])")
 
-          # Convert hex strings to decimal numbers
-          JSON_BASE=$((JSON_BASE_STR))
-          JSON_SIZE=$((JSON_SIZE_STR))
-          END=$((JSON_BASE + JSON_SIZE - 1))
-          echo "Bootloader range: 0x$(printf '%X' $JSON_BASE) - 0x$(printf '%X' $END)"
+          # Convert to decimal
+          BASE=$((JSON_BASE))
+          SIZE=$((JSON_SIZE))
+          END=$((BASE + SIZE - 1))
 
           # Extract STAGE1_BASE from header
           HFILE="payload/devices/tetris.h"
-          if [ ! -f "$HFILE" ]; then
-            echo "ERROR: cannot find tetris.h"
-            exit 1
-          fi
           STAGE1=$(( $(awk '/#define STAGE1_BASE/ {print $3; exit}' $HFILE) ))
-          echo "STAGE1_BASE: 0x$(printf '%X' $STAGE1)"
 
-          # Check if STAGE1_BASE is inside range
-          if (( STAGE1 >= JSON_BASE && STAGE1 <= END )); then
-            echo "✅ STAGE1_BASE is inside bootloader range, proceeding"
+          # Print computed ranges
+          printf "==== Fenrir Diagnostic ====\n"
+          printf "BL2_EXT_BASE: 0x%X\n" $BASE
+          printf "BL2_EXT_SIZE: 0x%X\n" $SIZE
+          printf "Computed END: 0x%X\n" $END
+          printf "STAGE1_BASE: 0x%X\n" $STAGE1
+          printf "Payload size: $(stat -c%s build/tetris/stage3/payload.bin) bytes\n"
+
+          # Check manually
+          if (( STAGE1 >= BASE && STAGE1 <= END )); then
+            echo "✅ STAGE1_BASE is inside JSON range"
           else
-            echo "❌ STAGE1_BASE is outside bootloader range, aborting"
+            echo "❌ STAGE1_BASE is outside JSON range"
             exit 1
           fi
 
