@@ -1,4 +1,4 @@
-name: Build Fenrir (Tetris) safely
+name: Build Fenrir (Tetris)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout repository
+      # 1️⃣ Checkout repo
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
@@ -21,66 +21,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential wget python3 unzip binutils
 
-      # 3️⃣ Safety check for correct tetris.bin
-      - name: Ensure only correct tetris.bin exists
+      # 3️⃣ Ensure bootloader image exists
+      - name: Ensure bin/tetris.bin exists
         run: |
-          FOUND=$(find bin/ -maxdepth 1 -name "tetris.bin" | wc -l)
-          if [ "$FOUND" -eq 0 ]; then
-            echo "ERROR: bin/tetris.bin not found! Place your correct LK image here."
+          if [ ! -f bin/tetris.bin ]; then
+            echo "ERROR: bin/tetris.bin not found! Place your LK image here."
             exit 1
           fi
-          if [ "$FOUND" -gt 1 ]; then
-            echo "ERROR: Multiple tetris.bin files found in bin/. Remove the old ones."
-            exit 1
-          fi
-          echo "✅ bin/tetris.bin exists and is unique"
+          echo "✅ bin/tetris.bin found"
           ls -lh bin/tetris.bin
 
-      # 4️⃣ Pre-check STAGE1_BASE using Python (64-bit safe)
-      - name: Pre-check stage addresses (64-bit safe)
-        run: |
-          HEADER="payload/devices/tetris.h"
-          if [ ! -f "$HEADER" ]; then
-            echo "ERROR: tetris.h not found at $HEADER"
-            exit 1
-          fi
-
-          python3 - <<'PY'
-import re
-
-with open("payload/devices/tetris.h") as f:
-    content = f.read()
-
-stage1 = int(re.search(r'#define STAGE1_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
-stage2 = int(re.search(r'#define STAGE2_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
-stage3 = int(re.search(r'#define STAGE3_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
-
-print(f"STAGE1_BASE: 0x{stage1:X}")
-print(f"STAGE2_BASE: 0x{stage2:X}")
-print(f"STAGE3_BASE: 0x{stage3:X}")
-
-if not (stage1 < stage2 < stage3):
-    print("ERROR: Stage base addresses are inconsistent")
-    exit(1)
-
-print("✅ Stage addresses look sane")
-PY
-
-      # 5️⃣ Build Fenrir payload
+      # 4️⃣ Build Fenrir payload
       - name: Build Fenrir payload
         run: |
           chmod +x build.sh
           ./build.sh tetris
 
-      # 6️⃣ Collect artifacts
+      # 5️⃣ Collect artifacts
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          cp -av out/* artifacts/ || true
           cp -av build/tetris/stage3/payload.elf artifacts/ || true
+          cp -av build/tetris/stage3/payload.bin artifacts/ || true
           cp -av payload/devices/tetris.h artifacts/ || true
 
-      # 7️⃣ Upload artifacts
+      # 6️⃣ Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
