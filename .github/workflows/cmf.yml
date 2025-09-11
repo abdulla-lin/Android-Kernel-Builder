@@ -1,4 +1,4 @@
-name: Build fenrir exploit (tetris)
+name: Build fenrir (tetris) with pre-check
 
 on:
   workflow_dispatch:
@@ -13,24 +13,23 @@ jobs:
         repository: abdulla-lin/fenrir
         ref: main
 
-    - name: Install dependencies
+    - name: Install deps
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential wget python3 unzip binutils
 
-    - name: Download lk.img and rename to bin/tetris.bin
+    - name: Download lk.img -> bin/tetris.bin
       run: |
-        mkdir -p bin devices artifacts
+        mkdir -p bin payload/devices devices artifacts
         FILEID="1ZuX0hBB9fSZ7I7tDj3l0n1qrM1-KzUa1"
         CONFIRM=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate \
-          "https://drive.google.com/uc?export=download&id=${FILEID}" -O- | \
-          sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p')
+          "https://drive.google.com/uc?export=download&id=${FILEID}" -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p')
         wget --load-cookies /tmp/cookies.txt \
           "https://drive.google.com/uc?export=download&confirm=${CONFIRM}&id=${FILEID}" \
           -O bin/tetris.bin
         ls -lh bin/tetris.bin
 
-    - name: Create tetris.json device config
+    - name: Create tetris.json in both locations
       run: |
         cat > devices/tetris.json <<'EOF'
         {
@@ -40,9 +39,70 @@ jobs:
           "notes": "CMF Phone 1 (tetris). 16MB LK at 0xFFFF000050700000."
         }
         EOF
-        cat devices/tetris.json
+        cat > payload/devices/tetris.json <<'EOF'
+        {
+          "codename": "tetris",
+          "bl2_ext_base": "0xFFFF000050700000",
+          "bl2_ext_size": "0x01000000",
+          "notes": "CMF Phone 1 (tetris). 16MB LK at 0xFFFF000050700000."
+        }
+        EOF
+        echo "Wrote devices/tetris.json and payload/devices/tetris.json"
+        ls -l devices payload/devices || true
+        cat payload/devices/tetris.json
 
-    - name: Build exploit for tetris
+    - name: Pre-check: ensure STAGE1_BASE is inside bl2_ext range
+      run: |
+        # parse values from files
+        JSON_BASE=$(python3 - <<'PY'
+import json
+j=json.load(open("payload/devices/tetris.json"))
+print(j["bl2_ext_base"])
+PY
+)
+        JSON_SIZE=$(python3 - <<'PY'
+import json,sys
+j=json.load(open("payload/devices/tetris.json"))
+s=int(j["bl2_ext_size"],0) if isinstance(j["bl2_ext_size"],str) else j["bl2_ext_size"]
+print(hex(s))
+PY
+)
+        echo "Config base=$JSON_BASE size=$JSON_SIZE"
+
+        # extract STAGE1_BASE from tetris.h (try payload/devices path then payload path)
+        if [ -f "payload/devices/tetris.h" ]; then
+          HFILE="payload/devices/tetris.h"
+        elif [ -f "payload/tetris.h" ]; then
+          HFILE="payload/tetris.h"
+        else
+          HFILE=$(ls | grep -i tetris.h || true)
+        fi
+        if [ -z "$HFILE" ]; then
+          echo "ERROR: cannot find tetris.h - aborting"
+          exit 1
+        fi
+        echo "Using header: $HFILE"
+        STAGE1=$(awk '/#define STAGE1_BASE/ {print $3; exit}' $HFILE)
+        echo "STAGE1_BASE = $STAGE1"
+
+        # convert to decimal
+        base_dec=$((JSON_BASE))
+        size_dec=$((JSON_SIZE))
+        start=$((base_dec))
+        end=$((base_dec + size_dec - 1))
+        stg1=$((STAGE1))
+
+        printf "Computed range: 0x%X - 0x%X\n" $start $end
+        printf "STAGE1_BASE: 0x%X\n" $stg1
+
+        if (( stg1 >= start && stg1 <= end )); then
+          echo "OK: STAGE1_BASE is inside bl2_ext range — proceeding to build."
+        else
+          echo "FAIL: STAGE1_BASE NOT inside bl2_ext range. Aborting build."
+          exit 1
+        fi
+
+    - name: Build fenrir for tetris
       run: |
         chmod +x build.sh
         ./build.sh tetris
@@ -52,10 +112,11 @@ jobs:
         mkdir -p artifacts
         cp -av out/* artifacts/ || true
         cp -av build/tetris/stage3/payload.elf artifacts/ || true
-        cp -av devices/tetris.json artifacts/ || true
+        cp -av payload/devices/tetris.json artifacts/ || true
+
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: fenrir-tetris-build
+        name: fenrir-tetris-artifacts
         path: artifacts/**
         
