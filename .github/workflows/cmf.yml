@@ -26,7 +26,7 @@ jobs:
         echo "Dumping tetris.json content:"
         cat payload/devices/tetris.json
 
-    - name: Pre-check: ensure STAGE1_BASE is inside JSON range
+    - name: Pre-check:ensure STAGE1_BASE is inside JSON range
       run: |
         JSON_FILE="payload/devices/tetris.json"
 
@@ -36,19 +36,19 @@ jobs:
         fi
 
         BL2_EXT_BASE=$(python3 - <<'PY'
-import json
-j=json.load(open("payload/devices/tetris.json"))
-b=int(j["bl2_ext_base"])
-print(b)
-PY
-)
+        import json
+        j=json.load(open("payload/devices/tetris.json"))
+        b=int(j["bl2_ext_base"])
+        print(b)
+        PY
+        )
         BL2_EXT_SIZE=$(python3 - <<'PY'
-import json
-j=json.load(open("payload/devices/tetris.json"))
-s=int(j["bl2_ext_size"])
-print(s)
-PY
-)
+        import json
+        j=json.load(open("payload/devices/tetris.json"))
+        s=int(j["bl2_ext_size"])
+        print(s)
+        PY
+        )
         echo "BL2_EXT_BASE: $(printf '0x%X' $BL2_EXT_BASE)"
         echo "BL2_EXT_SIZE: $(printf '0x%X' $BL2_EXT_SIZE)"
 
