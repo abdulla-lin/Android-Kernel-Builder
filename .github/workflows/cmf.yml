@@ -30,7 +30,7 @@ jobs:
             -O bin/tetris.bin
           ls -lh bin/tetris.bin
 
-      - name: Pre-check: convert JSON hex strings to numbers
+      - name: Pre-check:convert JSON hex strings to numbers
         run: |
           # Read hex strings from JSON
           JSON_BASE_STR=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_base'])")
