@@ -46,25 +46,25 @@ jobs:
           fi
 
           python3 - <<'PY'
-import re
+          import re
 
-with open("payload/devices/tetris.h") as f:
-    content = f.read()
+          with open("payload/devices/tetris.h") as f:
+          content = f.read()
 
-stage1 = int(re.search(r'#define STAGE1_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
-stage2 = int(re.search(r'#define STAGE2_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
-stage3 = int(re.search(r'#define STAGE3_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
+          stage1 = int(re.search(r'#define STAGE1_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
+          stage2 = int(re.search(r'#define STAGE2_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
+          stage3 = int(re.search(r'#define STAGE3_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
 
-print(f"STAGE1_BASE: 0x{stage1:X}")
-print(f"STAGE2_BASE: 0x{stage2:X}")
-print(f"STAGE3_BASE: 0x{stage3:X}")
+          print(f"STAGE1_BASE: 0x{stage1:X}")
+          print(f"STAGE2_BASE: 0x{stage2:X}")
+          print(f"STAGE3_BASE: 0x{stage3:X}")
 
-if not (stage1 < stage2 < stage3):
-    print("ERROR: Stage base addresses are inconsistent")
-    exit(1)
+          if not (stage1 < stage2 < stage3):
+          print("ERROR: Stage base addresses are inconsistent")
+          exit(1)
 
-print("✅ Stage addresses look sane")
-PY
+          print("✅ Stage addresses look sane")
+          PY
 
       # 5️⃣ Build Fenrir
       - name: Build Fenrir payload
