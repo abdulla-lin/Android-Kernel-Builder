@@ -1,4 +1,4 @@
-name: Build Fenrir (tetris) with Verified JSON
+name: Build Fenrir (tetris) directly from tetris.h
 
 on:
   workflow_dispatch:
@@ -8,69 +8,70 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout the repo
+      # 1️⃣ Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           repository: abdulla-lin/fenrir
           ref: main
 
-      # 2️⃣ Install required packages
-      - name: Install dependencies
+      # 2️⃣ Install dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential wget python3 unzip binutils
 
-      # 3️⃣ Debug JSON to ensure correct file is read
-      - name: Debug tetris.json
+      # 3️⃣ Ensure bootloader image exists
+      - name: Verify bootloader
         run: |
-          echo "Listing payload/devices/"
-          ls -l payload/devices
-          echo "Dumping tetris.json content:"
-          cat payload/devices/tetris.json
+          if [ ! -f "bin/tetris.bin" ]; then
+            echo "ERROR: bin/tetris.bin not found. Place your LK image here."
+            exit 1
+          fi
+          ls -lh bin/tetris.bin
 
-      # 4️⃣ Pre-check: Ensure STAGE1_BASE is inside JSON range
-      - name: Pre-check STAGE1_BASE vs JSON range
+      # 4️⃣ Pre-check: Verify STAGE1_BASE is valid
+      - name: Pre-check STAGE1_BASE
         run: |
-          JSON_FILE="payload/devices/tetris.json"
-
-          if [ ! -f "$JSON_FILE" ]; then
-            echo "ERROR: JSON file not found at $JSON_FILE"
+          HEADER="payload/devices/tetris.h"
+          if [ ! -f "$HEADER" ]; then
+            echo "ERROR: tetris.h not found at $HEADER"
             exit 1
           fi
 
-          BL2_EXT_BASE=$(python3 -c "import json; j=json.load(open('$JSON_FILE')); print(int(j['bl2_ext_base']))")
-          BL2_EXT_SIZE=$(python3 -c "import json; j=json.load(open('$JSON_FILE')); print(int(j['bl2_ext_size']))")
-          END=$((BL2_EXT_BASE + BL2_EXT_SIZE - 1))
+          STAGE1=$(awk '/#define STAGE1_BASE/ {print $3; exit}' "$HEADER")
+          STAGE2=$(awk '/#define STAGE2_BASE/ {print $3; exit}' "$HEADER")
+          STAGE3=$(awk '/#define STAGE3_BASE/ {print $3; exit}' "$HEADER")
 
-          STAGE1=$(awk '/#define STAGE1_BASE/ {print $3; exit}' payload/devices/tetris.h)
+          # Convert hex to decimal safely
           STAGE1_DEC=$((16#${STAGE1#0x}))
+          STAGE2_DEC=$((16#${STAGE2#0x}))
+          STAGE3_DEC=$((16#${STAGE3#0x}))
 
-          echo "BL2_EXT_BASE: $(printf '0x%X' $BL2_EXT_BASE)"
-          echo "BL2_EXT_SIZE: $(printf '0x%X' $BL2_EXT_SIZE)"
-          echo "Computed END: $(printf '0x%X' $END)"
-          echo "STAGE1_BASE: $(printf '0x%X' $STAGE1_DEC)"
+          echo "STAGE1_BASE: $STAGE1 ($STAGE1_DEC)"
+          echo "STAGE2_BASE: $STAGE2 ($STAGE2_DEC)"
+          echo "STAGE3_BASE: $STAGE3 ($STAGE3_DEC)"
 
-          if (( STAGE1_DEC >= BL2_EXT_BASE && STAGE1_DEC <= END )); then
-            echo "✅ STAGE1_BASE is inside JSON range"
-          else
-            echo "❌ STAGE1_BASE is outside JSON range"
+          # Basic sanity check
+          if (( STAGE1_DEC > STAGE2_DEC || STAGE2_DEC > STAGE3_DEC )); then
+            echo "ERROR: Stage base addresses are inconsistent"
             exit 1
           fi
+          echo "✅ Stage addresses look sane"
 
-      # 5️⃣ Build Fenrir for tetris
-      - name: Build Fenrir
+      # 5️⃣ Build Fenrir
+      - name: Build Fenrir payload
         run: |
           chmod +x build.sh
           ./build.sh tetris
 
-      # 6️⃣ Collect build artifacts
+      # 6️⃣ Collect artifacts
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
           cp -av out/* artifacts/ || true
           cp -av build/tetris/stage3/payload.elf artifacts/ || true
-          cp -av payload/devices/tetris.json artifacts/ || true
+          cp -av payload/devices/tetris.h artifacts/ || true
 
       # 7️⃣ Upload artifacts
       - name: Upload artifacts
