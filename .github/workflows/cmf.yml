@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential wget python3 unzip binutils
 
-      # 3️⃣ Ensure bootloader image exists
+      # 3️⃣ Ensure correct bootloader exists
       - name: Ensure bin/tetris.bin exists
         run: |
           if [ ! -f bin/tetris.bin ]; then
@@ -37,13 +37,17 @@ jobs:
           chmod +x build.sh
           ./build.sh tetris
 
-      # 5️⃣ Collect artifacts
+      # 5️⃣ Collect artifacts including patched bootloader
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          cp -av build/tetris/stage3/payload.elf artifacts/ || true
-          cp -av build/tetris/stage3/payload.bin artifacts/ || true
-          cp -av payload/devices/tetris.h artifacts/ || true
+          # Optional stage3 payload
+          cp -av build/tetris/stage3/payload.elf artifacts/ 2>/dev/null || true
+          cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
+          # Patched bootloader
+          cp -av bin/tetris.bin artifacts/
+          # Reference header
+          cp -av payload/devices/tetris.h artifacts/
 
       # 6️⃣ Upload artifacts
       - name: Upload artifacts
