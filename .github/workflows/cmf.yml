@@ -1,4 +1,4 @@
-name: Build Fenrir (Tetris)
+name: Build Fenrir Tetris with Diagnostics
 
 on:
   workflow_dispatch:
@@ -8,51 +8,62 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout repo
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          repository: abdulla-lin/fenrir
-          ref: main
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        repository: abdulla-lin/fenrir
+        ref: main
 
-      # 2️⃣ Install dependencies
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential wget python3 unzip binutils
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential wget python3 unzip binutils
 
-      # 3️⃣ Ensure correct bootloader exists
-      - name: Ensure bin/tetris.bin exists
-        run: |
-          if [ ! -f bin/tetris.bin ]; then
-            echo "ERROR: bin/tetris.bin not found! Place your LK image here."
-            exit 1
-          fi
-          echo "✅ bin/tetris.bin found"
-          ls -lh bin/tetris.bin
+    - name: Prepare bin folder
+      run: |
+        mkdir -p bin
+        rm -f bin/tetris.bin
 
-      # 4️⃣ Build Fenrir payload
-      - name: Build Fenrir payload
-        run: |
-          chmod +x build.sh
-          ./build.sh tetris
+    - name: Download stock bootloader
+      run: |
+        FILEID="1ZuX0hBB9fSZ7I7tDj3l0n1qrM1-KzUa1"
+        CONFIRM=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate \
+          "https://drive.google.com/uc?export=download&id=${FILEID}" -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p')
+        wget --load-cookies /tmp/cookies.txt \
+          "https://drive.google.com/uc?export=download&confirm=${CONFIRM}&id=${FILEID}" \
+          -O bin/tetris.bin
+        ls -lh bin/tetris.bin
 
-      # 5️⃣ Collect artifacts including patched bootloader
-      - name: Collect artifacts
-        run: |
-          mkdir -p artifacts
-          # Optional stage3 payload
-          cp -av build/tetris/stage3/payload.elf artifacts/ 2>/dev/null || true
-          cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
-          # Patched bootloader
-          cp -av bin/tetris.bin artifacts/
-          # Reference header
-          cp -av payload/devices/tetris.h artifacts/
+    - name: Verify stock bootloader
+      run: |
+        echo "==== Stock bootloader diagnostics ===="
+        hexdump -C bin/tetris.bin | head -n 20
+        # Optional: print first few bytes or known offset for STAGE1_BASE
+        # This is illustrative; you can add your actual offsets if known
 
-      # 6️⃣ Upload artifacts
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: fenrir-tetris-artifacts
-          path: artifacts/**
-          
+    - name: Build & inject payload
+      run: |
+        chmod +x build.sh
+        ./build.sh tetris
+
+    - name: Verify injected bootloader
+      run: |
+        echo "==== Injected bootloader diagnostics ===="
+        hexdump -C bin/tetris.bin | head -n 20
+        # Optional: check STAGE1_BASE, max-download-size
+        # For example:
+        # dd if=bin/tetris.bin bs=1 skip=<offset> count=8 2>/dev/null | xxd
+
+    - name: Collect artifacts
+      run: |
+        mkdir -p artifacts
+        cp -av bin/tetris.bin artifacts/
+        cp -av payload/devices/tetris.h artifacts/
+        ls -lh artifacts/
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: fenrir-tetris-injected
+        path: artifacts/**
+        
