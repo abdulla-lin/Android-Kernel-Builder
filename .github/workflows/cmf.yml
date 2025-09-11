@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -13,14 +14,14 @@ jobs:
           repository: abdulla-lin/fenrir
           ref: main
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential wget python3 unzip binutils
 
       - name: Download lk.img -> bin/tetris.bin
         run: |
-          mkdir -p bin payload/devices devices artifacts
+          mkdir -p bin payload/devices artifacts
           FILEID="1ZuX0hBB9fSZ7I7tDj3l0n1qrM1-KzUa1"
           CONFIRM=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate \
             "https://drive.google.com/uc?export=download&id=${FILEID}" -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p')
@@ -29,68 +30,25 @@ jobs:
             -O bin/tetris.bin
           ls -lh bin/tetris.bin
 
-      - name: Create tetris.json in both locations
-        run: |
-          # Write JSON to devices/
-          cat > devices/tetris.json <<'EOF'
-{
-  "codename": "tetris",
-  "bl2_ext_base": "0xFFFF000050700000",
-  "bl2_ext_size": "0x01000000",
-  "notes": "CMF Phone 1 (tetris). 16MB LK at 0xFFFF000050700000."
-}
-EOF
-
-          # Write JSON to payload/devices/
-          cat > payload/devices/tetris.json <<'EOF'
-{
-  "codename": "tetris",
-  "bl2_ext_base": "0xFFFF000050700000",
-  "bl2_ext_size": "0x01000000",
-  "notes": "CMF Phone 1 (tetris). 16MB LK at 0xFFFF000050700000."
-}
-EOF
-
-          # Notify and verify
-          echo "Wrote devices/tetris.json and payload/devices/tetris.json"
-          ls -l devices payload/devices || true
-          cat payload/devices/tetris.json
-
       - name: Pre-check: ensure STAGE1_BASE is inside bl2_ext range
         run: |
-          # parse values from JSON
-          JSON_BASE=$(python3 - <<'PY'
-import json
-j=json.load(open("payload/devices/tetris.json"))
-print(j["bl2_ext_base"])
-PY
-          )
-          JSON_SIZE=$(python3 - <<'PY'
-import json
-j=json.load(open("payload/devices/tetris.json"))
-s=int(j["bl2_ext_size"],0) if isinstance(j["bl2_ext_size"],str) else j["bl2_ext_size"]
-print(hex(s))
-PY
-          )
+          JSON_BASE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_base'])")
+          JSON_SIZE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); s=int(j['bl2_ext_size'],0) if isinstance(j['bl2_ext_size'],str) else j['bl2_ext_size']; print(hex(s))")
           echo "Config base=$JSON_BASE size=$JSON_SIZE"
 
-          # extract STAGE1_BASE from tetris.h
           if [ -f "payload/devices/tetris.h" ]; then
             HFILE="payload/devices/tetris.h"
           elif [ -f "payload/tetris.h" ]; then
             HFILE="payload/tetris.h"
           else
-            HFILE=$(ls | grep -i tetris.h || true)
-          fi
-          if [ -z "$HFILE" ]; then
             echo "ERROR: cannot find tetris.h - aborting"
             exit 1
           fi
+
           echo "Using header: $HFILE"
           STAGE1=$(awk '/#define STAGE1_BASE/ {print $3; exit}' $HFILE)
           echo "STAGE1_BASE = $STAGE1"
 
-          # convert to decimal
           base_dec=$((JSON_BASE))
           size_dec=$((JSON_SIZE))
           start=$((base_dec))
