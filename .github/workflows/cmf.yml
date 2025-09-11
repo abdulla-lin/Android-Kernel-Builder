@@ -31,39 +31,29 @@ jobs:
         JSON_FILE="payload/devices/tetris.json"
 
         if [ ! -f "$JSON_FILE" ]; then
-          echo "ERROR: JSON file not found at $JSON_FILE"
-          exit 1
+        echo "ERROR: JSON file not found at $JSON_FILE"
+        exit 1
         fi
 
-        BL2_EXT_BASE=$(python3 - <<'PY'
-        import json
-        j=json.load(open("payload/devices/tetris.json"))
-        b=int(j["bl2_ext_base"])
-        print(b)
-        PY
-        )
-        BL2_EXT_SIZE=$(python3 - <<'PY'
-        import json
-        j=json.load(open("payload/devices/tetris.json"))
-        s=int(j["bl2_ext_size"])
-        print(s)
-        PY
-        )
-        echo "BL2_EXT_BASE: $(printf '0x%X' $BL2_EXT_BASE)"
-        echo "BL2_EXT_SIZE: $(printf '0x%X' $BL2_EXT_SIZE)"
-
+        BL2_EXT_BASE=$(python3 -c "import json; j=json.load(open('$JSON_FILE')); print(int(j['bl2_ext_base']))")
+        BL2_EXT_SIZE=$(python3 -c "import json; j=json.load(open('$JSON_FILE')); print(int(j['bl2_ext_size']))")
         END=$((BL2_EXT_BASE + BL2_EXT_SIZE - 1))
-        echo "Computed END: $(printf '0x%X' $END)"
 
         STAGE1=$(awk '/#define STAGE1_BASE/ {print $3; exit}' payload/devices/tetris.h)
-        echo "STAGE1_BASE: $STAGE1"
+        STAGE1_DEC=$((16#${STAGE1#0x}))
 
-        if (( 0x$STAGE1 >= BL2_EXT_BASE && 0x$STAGE1 <= END )); then
-          echo "✅ STAGE1_BASE is inside JSON range"
-        else
-          echo "❌ STAGE1_BASE is outside JSON range"
-          exit 1
-        fi
+echo "BL2_EXT_BASE: $(printf '0x%X' $BL2_EXT_BASE)"
+echo "BL2_EXT_SIZE: $(printf '0x%X' $BL2_EXT_SIZE)"
+echo "Computed END: $(printf '0x%X' $END)"
+echo "STAGE1_BASE: $(printf '0x%X' $STAGE1_DEC)"
+
+if (( STAGE1_DEC >= BL2_EXT_BASE && STAGE1_DEC <= END )); then
+  echo "✅ STAGE1_BASE is inside JSON range"
+else
+  echo "❌ STAGE1_BASE is outside JSON range"
+  exit 1
+fi
+
 
     - name: Build fenrir for tetris
       run: |
