@@ -1,4 +1,4 @@
-name: Build Fenrir (tetris) directly from tetris.h
+name: Build Fenrir (Tetris) safely
 
 on:
   workflow_dispatch:
@@ -8,8 +8,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout repo
-      - name: Checkout repository
+      # 1️⃣ Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
           repository: abdulla-lin/fenrir
@@ -21,17 +21,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential wget python3 unzip binutils
 
-      # 3️⃣ Ensure bootloader image exists
-      - name: Verify bootloader
+      # 3️⃣ Safety check for correct tetris.bin
+      - name: Ensure only correct tetris.bin exists
         run: |
-          if [ ! -f "bin/tetris.bin" ]; then
-            echo "ERROR: bin/tetris.bin not found. Place your LK image here."
+          FOUND=$(find bin/ -maxdepth 1 -name "tetris.bin" | wc -l)
+          if [ "$FOUND" -eq 0 ]; then
+            echo "ERROR: bin/tetris.bin not found! Place your correct LK image here."
             exit 1
           fi
+          if [ "$FOUND" -gt 1 ]; then
+            echo "ERROR: Multiple tetris.bin files found in bin/. Remove the old ones."
+            exit 1
+          fi
+          echo "✅ bin/tetris.bin exists and is unique"
           ls -lh bin/tetris.bin
 
-      # 4️⃣ Pre-check: Verify STAGE1_BASE is valid
-      - name: Pre-check STAGE1_BASE
+      # 4️⃣ Pre-check STAGE1_BASE using Python (64-bit safe)
+      - name: Pre-check stage addresses (64-bit safe)
         run: |
           HEADER="payload/devices/tetris.h"
           if [ ! -f "$HEADER" ]; then
@@ -39,25 +45,26 @@ jobs:
             exit 1
           fi
 
-          STAGE1=$(awk '/#define STAGE1_BASE/ {print $3; exit}' "$HEADER")
-          STAGE2=$(awk '/#define STAGE2_BASE/ {print $3; exit}' "$HEADER")
-          STAGE3=$(awk '/#define STAGE3_BASE/ {print $3; exit}' "$HEADER")
+          python3 - <<'PY'
+import re
 
-          # Convert hex to decimal safely
-          STAGE1_DEC=$((16#${STAGE1#0x}))
-          STAGE2_DEC=$((16#${STAGE2#0x}))
-          STAGE3_DEC=$((16#${STAGE3#0x}))
+with open("payload/devices/tetris.h") as f:
+    content = f.read()
 
-          echo "STAGE1_BASE: $STAGE1 ($STAGE1_DEC)"
-          echo "STAGE2_BASE: $STAGE2 ($STAGE2_DEC)"
-          echo "STAGE3_BASE: $STAGE3 ($STAGE3_DEC)"
+stage1 = int(re.search(r'#define STAGE1_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
+stage2 = int(re.search(r'#define STAGE2_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
+stage3 = int(re.search(r'#define STAGE3_BASE\s+(0x[0-9A-Fa-f]+)', content).group(1), 16)
 
-          # Basic sanity check
-          if (( STAGE1_DEC > STAGE2_DEC || STAGE2_DEC > STAGE3_DEC )); then
-            echo "ERROR: Stage base addresses are inconsistent"
-            exit 1
-          fi
-          echo "✅ Stage addresses look sane"
+print(f"STAGE1_BASE: 0x{stage1:X}")
+print(f"STAGE2_BASE: 0x{stage2:X}")
+print(f"STAGE3_BASE: 0x{stage3:X}")
+
+if not (stage1 < stage2 < stage3):
+    print("ERROR: Stage base addresses are inconsistent")
+    exit(1)
+
+print("✅ Stage addresses look sane")
+PY
 
       # 5️⃣ Build Fenrir
       - name: Build Fenrir payload
