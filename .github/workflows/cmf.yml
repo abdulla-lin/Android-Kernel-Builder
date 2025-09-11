@@ -51,22 +51,22 @@ jobs:
         ls -l devices payload/devices || true
         cat payload/devices/tetris.json
 
-    - name: Pre-check: ensure STAGE1_BASE is inside bl2_ext range
-      run: |
+        - name: Pre-check: ensure STAGE1_BASE is inside bl2_ext range
+          run: |
         # parse values from files
         JSON_BASE=$(python3 - <<'PY'
-import json
-j=json.load(open("payload/devices/tetris.json"))
-print(j["bl2_ext_base"])
-PY
-)
+        import json
+        j=json.load(open("payload/devices/tetris.json"))
+        print(j["bl2_ext_base"])
+        PY
+        )
         JSON_SIZE=$(python3 - <<'PY'
-import json,sys
-j=json.load(open("payload/devices/tetris.json"))
-s=int(j["bl2_ext_size"],0) if isinstance(j["bl2_ext_size"],str) else j["bl2_ext_size"]
-print(hex(s))
-PY
-)
+        import json,sys
+        j=json.load(open("payload/devices/tetris.json"))
+        s=int(j["bl2_ext_size"],0) if isinstance(j["bl2_ext_size"],str) else j["bl2_ext_size"]
+        print(hex(s))
+        PY
+        )
         echo "Config base=$JSON_BASE size=$JSON_SIZE"
 
         # extract STAGE1_BASE from tetris.h (try payload/devices path then payload path)
