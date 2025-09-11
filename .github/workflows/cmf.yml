@@ -30,38 +30,32 @@ jobs:
             -O bin/tetris.bin
           ls -lh bin/tetris.bin
 
-      - name: Pre-check:ensure STAGE1_BASE is inside bl2_ext range
+      - name: Pre-check: convert JSON hex strings to numbers
         run: |
-         JSON_BASE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_base'])")
-         JSON_SIZE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); s=int(j['bl2_ext_size'],0) if isinstance(j['bl2_ext_size'],str) else j['bl2_ext_size']; print(hex(s))")
-         echo "Config base=$JSON_BASE size=$JSON_SIZE"
+          # Read hex strings from JSON
+          JSON_BASE_STR=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_base'])")
+          JSON_SIZE_STR=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_size'])")
 
-          if [ -f "payload/devices/tetris.h" ]; then
-            HFILE="payload/devices/tetris.h"
-          elif [ -f "payload/tetris.h" ]; then
-            HFILE="payload/tetris.h"
-          else
-            echo "ERROR: cannot find tetris.h - aborting"
+          # Convert hex strings to decimal numbers
+          JSON_BASE=$((JSON_BASE_STR))
+          JSON_SIZE=$((JSON_SIZE_STR))
+          END=$((JSON_BASE + JSON_SIZE - 1))
+          echo "Bootloader range: 0x$(printf '%X' $JSON_BASE) - 0x$(printf '%X' $END)"
+
+          # Extract STAGE1_BASE from header
+          HFILE="payload/devices/tetris.h"
+          if [ ! -f "$HFILE" ]; then
+            echo "ERROR: cannot find tetris.h"
             exit 1
           fi
+          STAGE1=$(( $(awk '/#define STAGE1_BASE/ {print $3; exit}' $HFILE) ))
+          echo "STAGE1_BASE: 0x$(printf '%X' $STAGE1)"
 
-          echo "Using header: $HFILE"
-          STAGE1=$(awk '/#define STAGE1_BASE/ {print $3; exit}' $HFILE)
-          echo "STAGE1_BASE = $STAGE1"
-
-          base_dec=$((JSON_BASE))
-          size_dec=$((JSON_SIZE))
-          start=$((base_dec))
-          end=$((base_dec + size_dec - 1))
-          stg1=$((STAGE1))
-
-          printf "Computed range: 0x%X - 0x%X\n" $start $end
-          printf "STAGE1_BASE: 0x%X\n" $stg1
-
-          if (( stg1 >= start && stg1 <= end )); then
-            echo "OK: STAGE1_BASE is inside bl2_ext range — proceeding to build."
+          # Check if STAGE1_BASE is inside range
+          if (( STAGE1 >= JSON_BASE && STAGE1 <= END )); then
+            echo "✅ STAGE1_BASE is inside bootloader range, proceeding"
           else
-            echo "FAIL: STAGE1_BASE NOT inside bl2_ext range. Aborting build."
+            echo "❌ STAGE1_BASE is outside bootloader range, aborting"
             exit 1
           fi
 
