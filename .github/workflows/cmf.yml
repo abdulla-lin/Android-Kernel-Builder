@@ -1,4 +1,4 @@
-name: Build fenrir (tetris) with verified JSON
+name: Build Fenrir (tetris) with Verified JSON
 
 on:
   workflow_dispatch:
@@ -6,70 +6,76 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
+      # 1️⃣ Checkout the repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: abdulla-lin/fenrir
+          ref: main
 
-    - name: Checkout repo
-      uses: actions/checkout@v4
-      with:
-        repository: abdulla-lin/fenrir
-        ref: main
+      # 2️⃣ Install required packages
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential wget python3 unzip binutils
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential wget python3 unzip binutils
+      # 3️⃣ Debug JSON to ensure correct file is read
+      - name: Debug tetris.json
+        run: |
+          echo "Listing payload/devices/"
+          ls -l payload/devices
+          echo "Dumping tetris.json content:"
+          cat payload/devices/tetris.json
 
-    - name: Debug JSON
-      run: |
-        echo "Listing payload/devices/"
-        ls -l payload/devices
-        echo "Dumping tetris.json content:"
-        cat payload/devices/tetris.json
+      # 4️⃣ Pre-check: Ensure STAGE1_BASE is inside JSON range
+      - name: Pre-check STAGE1_BASE vs JSON range
+        run: |
+          JSON_FILE="payload/devices/tetris.json"
 
-    - name: Pre-check:ensure STAGE1_BASE is inside JSON range
-      run: |
-        JSON_FILE="payload/devices/tetris.json"
+          if [ ! -f "$JSON_FILE" ]; then
+            echo "ERROR: JSON file not found at $JSON_FILE"
+            exit 1
+          fi
 
-        if [ ! -f "$JSON_FILE" ]; then
-        echo "ERROR: JSON file not found at $JSON_FILE"
-        exit 1
-        fi
+          BL2_EXT_BASE=$(python3 -c "import json; j=json.load(open('$JSON_FILE')); print(int(j['bl2_ext_base']))")
+          BL2_EXT_SIZE=$(python3 -c "import json; j=json.load(open('$JSON_FILE')); print(int(j['bl2_ext_size']))")
+          END=$((BL2_EXT_BASE + BL2_EXT_SIZE - 1))
 
-        BL2_EXT_BASE=$(python3 -c "import json; j=json.load(open('$JSON_FILE')); print(int(j['bl2_ext_base']))")
-        BL2_EXT_SIZE=$(python3 -c "import json; j=json.load(open('$JSON_FILE')); print(int(j['bl2_ext_size']))")
-        END=$((BL2_EXT_BASE + BL2_EXT_SIZE - 1))
+          STAGE1=$(awk '/#define STAGE1_BASE/ {print $3; exit}' payload/devices/tetris.h)
+          STAGE1_DEC=$((16#${STAGE1#0x}))
 
-        STAGE1=$(awk '/#define STAGE1_BASE/ {print $3; exit}' payload/devices/tetris.h)
-        STAGE1_DEC=$((16#${STAGE1#0x}))
+          echo "BL2_EXT_BASE: $(printf '0x%X' $BL2_EXT_BASE)"
+          echo "BL2_EXT_SIZE: $(printf '0x%X' $BL2_EXT_SIZE)"
+          echo "Computed END: $(printf '0x%X' $END)"
+          echo "STAGE1_BASE: $(printf '0x%X' $STAGE1_DEC)"
 
-echo "BL2_EXT_BASE: $(printf '0x%X' $BL2_EXT_BASE)"
-echo "BL2_EXT_SIZE: $(printf '0x%X' $BL2_EXT_SIZE)"
-echo "Computed END: $(printf '0x%X' $END)"
-echo "STAGE1_BASE: $(printf '0x%X' $STAGE1_DEC)"
+          if (( STAGE1_DEC >= BL2_EXT_BASE && STAGE1_DEC <= END )); then
+            echo "✅ STAGE1_BASE is inside JSON range"
+          else
+            echo "❌ STAGE1_BASE is outside JSON range"
+            exit 1
+          fi
 
-if (( STAGE1_DEC >= BL2_EXT_BASE && STAGE1_DEC <= END )); then
-  echo "✅ STAGE1_BASE is inside JSON range"
-else
-  echo "❌ STAGE1_BASE is outside JSON range"
-  exit 1
-fi
+      # 5️⃣ Build Fenrir for tetris
+      - name: Build Fenrir
+        run: |
+          chmod +x build.sh
+          ./build.sh tetris
 
+      # 6️⃣ Collect build artifacts
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          cp -av out/* artifacts/ || true
+          cp -av build/tetris/stage3/payload.elf artifacts/ || true
+          cp -av payload/devices/tetris.json artifacts/ || true
 
-    - name: Build fenrir for tetris
-      run: |
-        chmod +x build.sh
-        ./build.sh tetris
-
-    - name: Collect artifacts
-      run: |
-        mkdir -p artifacts
-        cp -av out/* artifacts/ || true
-        cp -av build/tetris/stage3/payload.elf artifacts/ || true
-        cp -av payload/devices/tetris.json artifacts/ || true
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: fenrir-tetris-artifacts
-        path: artifacts/**
-        
+      # 7️⃣ Upload artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fenrir-tetris-artifacts
+          path: artifacts/**
+          
