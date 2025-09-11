@@ -30,11 +30,11 @@ jobs:
             -O bin/tetris.bin
           ls -lh bin/tetris.bin
 
-      - name: Pre-check: ensure STAGE1_BASE is inside bl2_ext range
+      - name: Pre-check:ensure STAGE1_BASE is inside bl2_ext range
         run: |
-          JSON_BASE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_base'])")
-          JSON_SIZE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); s=int(j['bl2_ext_size'],0) if isinstance(j['bl2_ext_size'],str) else j['bl2_ext_size']; print(hex(s))")
-          echo "Config base=$JSON_BASE size=$JSON_SIZE"
+         JSON_BASE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); print(j['bl2_ext_base'])")
+         JSON_SIZE=$(python3 -c "import json; j=json.load(open('payload/devices/tetris.json')); s=int(j['bl2_ext_size'],0) if isinstance(j['bl2_ext_size'],str) else j['bl2_ext_size']; print(hex(s))")
+         echo "Config base=$JSON_BASE size=$JSON_SIZE"
 
           if [ -f "payload/devices/tetris.h" ]; then
             HFILE="payload/devices/tetris.h"
