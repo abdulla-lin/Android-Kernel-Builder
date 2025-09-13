@@ -1,4 +1,4 @@
-name: Build Fenrir (Tetris)
+name: Build Fenrir (Tetris) with verification
 
 on:
   workflow_dispatch:
@@ -6,61 +6,162 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      # 1️⃣ Checkout repo
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           repository: abdulla-lin/fenrir
           ref: main
 
-      # 2️⃣ Install dependencies
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential wget python3 unzip binutils
 
-      # 3️⃣ Ensure correct bootloader exists
       - name: Ensure bin/tetris.bin exists
         run: |
+          mkdir -p bin build/tetris/stage3 artifacts
           if [ ! -f bin/tetris.bin ]; then
-            echo "❌ ERROR: bin/tetris.bin not found! Place your LK image here."
+            echo "❌ ERROR: bin/tetris.bin not found. Upload your stock LK to bin/tetris.bin"
+            ls -la bin || true
             exit 1
           fi
           echo "✅ bin/tetris.bin found"
           ls -lh bin/tetris.bin
 
-      # 4️⃣ Build Fenrir payload
-      - name: Build Fenrir payload
+      - name: Build & inject Fenrir payload
         run: |
           chmod +x build.sh
-          ./build.sh tetris
+          # pass explicit stock LK path to avoid ambiguity
+          ./build.sh tetris bin/tetris.bin
 
-      # 5️⃣ Collect artifacts including patched bootloader
+      - name: Verify lk.patched exists
+        run: |
+          if [ ! -f lk.patched ]; then
+            echo "❌ ERROR: lk.patched not found after build"
+            ls -la
+            exit 1
+          fi
+          echo "✅ lk.patched found"
+          echo "stock size: $(stat -c%s bin/tetris.bin) bytes"
+          echo "patched size: $(stat -c%s lk.patched) bytes"
+          echo "stock sha256: $(sha256sum bin/tetris.bin | awk '{print $1}')"
+          echo "patched sha256: $(sha256sum lk.patched | awk '{print $1}')"
+
+      - name: Inspect critical offsets (fastboot hooks + stage1)
+        run: |
+          set -euo pipefail
+
+          HEADER="payload/devices/tetris.h"
+          STOCK="bin/tetris.bin"
+          PATCHED="lk.patched"
+
+          if [ ! -f "$HEADER" ]; then
+            echo "ERROR: header $HEADER missing"; exit 1
+          fi
+
+          # helper to read define value
+          read_define() {
+            awk -v k="$1" '$0 ~ k {print $3; exit}' "$HEADER"
+          }
+
+          BL2_S=$(read_define BL2_EXT_BASE)
+          if [ -z "$BL2_S" ]; then
+            echo "ERROR: BL2_EXT_BASE not found in header"; exit 1
+          fi
+          FAST_REG_S=$(read_define FASTBOOT_REGISTER_ADDR)
+          FAST_OK_S=$(read_define FASTBOOT_OKAY_ADDR)
+          STG1_S=$(read_define STAGE1_BASE)
+
+          echo "Header values:"
+          echo "  BL2_EXT_BASE = $BL2_S"
+          echo "  FASTBOOT_REGISTER_ADDR = $FAST_REG_S"
+          echo "  FASTBOOT_OKAY_ADDR = $FAST_OK_S"
+          echo "  STAGE1_BASE = $STG1_S"
+          echo
+
+          # convert hex to decimal using python (safe for big values)
+          to_dec() {
+            python3 - <<PY
+           s="$1"
+          print(int(s,16) if s.lower().startswith("0x") else int(s,0))
+          PY
+          }
+
+          BL2=$(to_dec "$BL2_S")
+          FAST_REG=$(to_dec "$FAST_REG_S")
+          FAST_OK=$(to_dec "$FAST_OK_S")
+          STG1=$(to_dec "$STG1_S")
+
+          BL2_END=$((BL2 + $(to_dec "$(read_define BL2_EXT_SIZE)") - 1))
+
+          off_hex(){ printf "0x%X" $(( $1 - BL2 )); }
+          OFF_FAST_REG=$((FAST_REG - BL2))
+          OFF_FAST_OK=$((FAST_OK - BL2))
+          OFF_STG1=$((STG1 - BL2))
+
+          echo "Computed file offsets (relative to BL2 base):"
+          echo "  FAST_REG offset: $(off_hex $FAST_REG)  (decimal: $OFF_FAST_REG)"
+          echo "  FAST_OK  offset: $(off_hex $FAST_OK)  (decimal: $OFF_FAST_OK)"
+          echo "  STAGE1    offset: $(off_hex $STG1)  (decimal: $OFF_STG1)"
+          echo
+
+          # basic diffs summary
+          echo "=== cmp -l (first 80 diffs) ==="
+          cmp -l "$STOCK" "$PATCHED" | head -n 80 || true
+          echo
+
+          # write small blobs for comparison
+          dd if="$STOCK"   of=/tmp/stock_fast_reg.bin bs=1 skip=$OFF_FAST_REG count=128 2>/dev/null || true
+          dd if="$PATCHED" of=/tmp/patched_fast_reg.bin bs=1 skip=$OFF_FAST_REG count=128 2>/dev/null || true
+
+          dd if="$STOCK"   of=/tmp/stock_stage1.bin bs=1 skip=$OFF_STG1 count=128 2>/dev/null || true
+          dd if="$PATCHED" of=/tmp/patched_stage1.bin bs=1 skip=$OFF_STG1 count=128 2>/dev/null || true
+
+          echo "=== hexdump: stock @ FAST_REG ==="
+          hexdump -C /tmp/stock_fast_reg.bin || true
+          echo "=== hexdump: patched @ FAST_REG ==="
+          hexdump -C /tmp/patched_fast_reg.bin || true
+          echo
+          echo "=== hexdump: stock @ STAGE1 ==="
+          hexdump -C /tmp/stock_stage1.bin || true
+          echo "=== hexdump: patched @ STAGE1 ==="
+          hexdump -C /tmp/patched_stage1.bin || true
+          echo
+
+          # check difference at FAST_REG: we expect patched bytes != stock
+          if cmp -s /tmp/stock_fast_reg.bin /tmp/patched_fast_reg.bin; then
+            echo "❌ FAIL: FASTBOOT_REGISTER_ADDR region is IDENTICAL between stock and patched. Hook not applied."
+            exit 1
+          else
+            echo "✅ FASTBOOT_REGISTER_ADDR region differs between stock and patched — hook may be applied."
+          fi
+
+          # check STAGE1 region nonzero (indicates payload written)
+          if dd if=/tmp/patched_stage1.bin bs=1 count=128 2>/dev/null | od -An -t u1 | tr -s ' ' '\n' | awk '{s+=$1} END{print s}'; then
+            SUM=$(dd if=/tmp/patched_stage1.bin bs=1 count=128 2>/dev/null | od -An -t u1 | tr -s ' ' '\n' | awk '{s+=$1} END{print s}')
+          else
+            SUM=0
+          fi
+          if [ "$SUM" -eq 0 ]; then
+            echo "❌ FAIL: STAGE1 region in patched file is all zeros. No payload present at STAGE1."
+            exit 2
+          else
+            echo "✅ STAGE1 region in patched file looks non-empty (sum=$SUM)."
+          fi
+
+          echo "Verification PASSED basic checks. If you still see flash-time crashes, paste this job's hexdumps and cmp output here for deeper analysis."
+
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-
-          # Stage3 payloads (optional)
-          cp -av build/tetris/stage3/payload.elf artifacts/ 2>/dev/null || true
-          cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
-
-          # Patched bootloader
-          if [ -f lk.patched ]; then
-            cp -av lk.patched artifacts/tetris-patched.bin
-            echo "✅ Patched bootloader copied as artifacts/tetris-patched.bin"
-          else
-            echo "⚠️ WARNING: lk.patched not found, check build logs"
-          fi
-
-          # Reference header
+          cp -av lk.patched artifacts/tetris-patched.bin
           cp -av payload/devices/tetris.h artifacts/ 2>/dev/null || true
+          cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
+          ls -lh artifacts
 
-      # 6️⃣ Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: fenrir-tetris-artifacts
           path: artifacts/**
-          
