@@ -1,99 +1,257 @@
-name: Build & Verify Fenrir (Tetris)
+name: Build & Deep Verify Fenrir (Tetris)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
-      # 1️⃣ Checkout repo
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           repository: abdulla-lin/fenrir
           ref: main
 
-      # 2️⃣ Install dependencies
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential wget python3 unzip binutils
+          sudo apt-get install -y build-essential wget python3 unzip binutils xxd
 
-      # 3️⃣ Ensure stock bootloader exists
-      - name: Ensure bin/tetris.bin exists
+      - name: Ensure stock LK exists
         run: |
+          mkdir -p bin build/tetris/stage3 artifacts
           if [ ! -f bin/tetris.bin ]; then
-            echo "❌ ERROR: bin/tetris.bin not found! Place your LK image here."
+            echo "ERROR: bin/tetris.bin (stock LK) not found. Upload your stock LK to bin/tetris.bin"
+            ls -la bin || true
             exit 1
           fi
-          echo "✅ Found stock bin/tetris.bin"
+          echo "Found bin/tetris.bin"
           ls -lh bin/tetris.bin
 
-      # 4️⃣ Build Fenrir payload
-      - name: Build Fenrir payload
+      - name: Build Fenrir payload (explicit LK path)
         run: |
           chmod +x build.sh
-          ./build.sh tetris
+          ./build.sh tetris bin/tetris.bin
 
-      # 5️⃣ Collect artifacts
+      - name: Ensure patched output exists
+        run: |
+          if [ ! -f lk.patched ]; then
+            echo "ERROR: lk.patched not found — build likely failed"
+            ls -la
+            exit 1
+          fi
+          echo "Found lk.patched"
+          ls -lh lk.patched
+
+      - name: Read header defines to outputs
+        id: read_header
+        run: |
+          HEADER="payload/devices/tetris.h"
+          if [ ! -f "$HEADER" ]; then
+            echo "MISSING HEADER: $HEADER"
+            exit 1
+          fi
+
+          read_define() {
+            awk -v k="$1" '$0 ~ k {print $3; exit}' "$HEADER"
+          }
+
+          BL2_EXT_BASE=$(read_define BL2_EXT_BASE)
+          BL2_EXT_SIZE=$(read_define BL2_EXT_SIZE)
+          STAGE1_BASE=$(read_define STAGE1_BASE)
+          FAST_REG=$(read_define FASTBOOT_REGISTER_ADDR)
+          FAST_OK=$(read_define FASTBOOT_OKAY_ADDR)
+
+          echo "BL2_EXT_BASE=$BL2_EXT_BASE" >> $GITHUB_OUTPUT
+          echo "BL2_EXT_SIZE=$BL2_EXT_SIZE" >> $GITHUB_OUTPUT
+          echo "STAGE1_BASE=$STAGE1_BASE" >> $GITHUB_OUTPUT
+          echo "FAST_REG=$FAST_REG" >> $GITHUB_OUTPUT
+          echo "FAST_OK=$FAST_OK" >> $GITHUB_OUTPUT
+
+      - name: Compute offsets and dump regions (hex + disasm)
+        id: inspect
+        run: |
+          set -euo pipefail
+
+          STOCK="bin/tetris.bin"
+          PATCHED="lk.patched"
+          OUTDIR="artifacts/verify"
+          mkdir -p "$OUTDIR"
+
+          # read values from workflow outputs
+          BL2_S="${{ steps.read_header.outputs.BL2_EXT_BASE }}"
+          BL2_SIZE_S="${{ steps.read_header.outputs.BL2_EXT_SIZE }}"
+          STG1_S="${{ steps.read_header.outputs.STAGE1_BASE }}"
+          FAST_REG_S="${{ steps.read_header.outputs.FAST_REG }}"
+          FAST_OK_S="${{ steps.read_header.outputs.FAST_OK }}"
+
+          echo "Header raw values:"
+          echo "  BL2_EXT_BASE = $BL2_S"
+          echo "  BL2_EXT_SIZE = $BL2_SIZE_S"
+          echo "  STAGE1_BASE  = $STG1_S"
+          echo "  FAST_REG     = $FAST_REG_S"
+          echo "  FAST_OK      = $FAST_OK_S"
+          echo
+
+          # Use Python for safe big-int arithmetic and to compute offsets (no shell overflow)
+          python3 - <<PY > $OUTDIR/offsets.txt
+          import sys
+          bl2 = sys.argv[1]
+          stg1 = sys.argv[2]
+          fast = sys.argv[3]
+          fast_ok = sys.argv[4] if len(sys.argv) > 4 else "0"
+          # parse
+          b = int(bl2,0)
+          s1 = int(stg1,0)
+          f = int(fast,0)
+          fok = int(fast_ok,0) if fast_ok else 0
+          off_fast = f - b
+          off_fast_ok = fok - b if fok else None
+          off_stg1 = s1 - b
+          print("BL2_BASE_DEC=%d" % b)
+          print("OFF_FAST_DEC=%d" % off_fast)
+          print("OFF_FAST_HEX=0x%X" % off_fast)
+          print("OFF_FAST_OK_DEC=%s" % (str(off_fast_ok) if off_fast_ok is not None else ""))
+          print("OFF_STG1_DEC=%d" % off_stg1)
+          print("OFF_STG1_HEX=0x%X" % off_stg1)
+          PY
+          python3 - <<PY
+           # print offsets for logs
+           print("Offsets computed (see artifacts/verify/offsets.txt for exact values)")
+           PY
+
+          cat $OUTDIR/offsets.txt
+
+          # read computed offsets back (simple parse)
+          OFF_FAST=$(awk -F= '/OFF_FAST_DEC/ {print $2}' $OUTDIR/offsets.txt | tr -d '\r\n')
+          OFF_STG1=$(awk -F= '/OFF_STG1_DEC/ {print $2}' $OUTDIR/offsets.txt | tr -d '\r\n')
+          OFF_FAST_OK_LINE=$(awk -F= '/OFF_FAST_OK_DEC/ {print $2}' $OUTDIR/offsets.txt | tr -d '\r\n')
+          if [ -n "$OFF_FAST_OK_LINE" ]; then
+            OFF_FAST_OK="$OFF_FAST_OK_LINE"
+          else
+            OFF_FAST_OK="-1"
+          fi
+
+          echo "Using file offsets:"
+          printf "  FAST_REG offset = %s (decimal)\n" "$OFF_FAST"
+          printf "  STAGE1  offset = %s (decimal)\n" "$OFF_STG1"
+          printf "  FAST_OK  offset = %s (decimal)\n" "$OFF_FAST_OK"
+
+          # ensure offsets are integer numbers
+          if ! echo "$OFF_FAST" | grep -E '^[0-9-]+' >/dev/null; then echo "Bad FAST offset"; exit 1; fi
+          if ! echo "$OFF_STG1" | grep -E '^[0-9-]+' >/dev/null; then echo "Bad STG1 offset"; exit 1; fi
+
+          STOCK_SZ=$(stat -c%s "$STOCK")
+          PATCHED_SZ=$(stat -c%s "$PATCHED")
+          echo "Stock size: $STOCK_SZ  Patched size: $PATCHED_SZ"
+          echo
+
+          # Sanity: offsets must be in-range for stock file
+          if [ "$OFF_FAST" -lt 0 ] || [ "$OFF_FAST" -ge "$STOCK_SZ" ]; then
+            echo "ERROR: FAST_REG offset $OFF_FAST out of stock file bounds (0..$((STOCK_SZ-1))). Aborting."
+            exit 2
+          fi
+          if [ "$OFF_STG1" -lt 0 ] || [ "$OFF_STG1" -ge "$STOCK_SZ" ]; then
+            echo "ERROR: STAGE1 offset $OFF_STG1 out of stock file bounds (0..$((STOCK_SZ-1))). Aborting."
+            exit 2
+          fi
+
+          # Dump small windows (32 bytes before -> 96 bytes after)
+          PRE=32
+          LEN=128
+
+          dd if="$STOCK"  bs=1 skip=$((OFF_FAST - PRE)) count=$((PRE + LEN)) 2>/dev/null > $OUTDIR/stock_fast_window.bin || true
+          dd if="$PATCHED" bs=1 skip=$((OFF_FAST - PRE)) count=$((PRE + LEN)) 2>/dev/null > $OUTDIR/patched_fast_window.bin || true
+
+          dd if="$STOCK"  bs=1 skip=$((OFF_STG1 - PRE)) count=$((PRE + LEN)) 2>/dev/null > $OUTDIR/stock_stg1_window.bin || true
+          dd if="$PATCHED" bs=1 skip=$((OFF_STG1 - PRE)) count=$((PRE + LEN)) 2>/dev/null > $OUTDIR/patched_stg1_window.bin || true
+
+          # Hexdumps for human inspection
+          hexdump -C $OUTDIR/stock_fast_window.bin > $OUTDIR/stock_fast.hex || true
+          hexdump -C $OUTDIR/patched_fast_window.bin > $OUTDIR/patched_fast.hex || true
+
+          hexdump -C $OUTDIR/stock_stg1_window.bin > $OUTDIR/stock_stg1.hex || true
+          hexdump -C $OUTDIR/patched_stg1_window.bin > $OUTDIR/patched_stg1.hex || true
+
+          # Compare region bytes and write cmp output (first 200 diffs)
+          cmp -l $OUTDIR/stock_fast_window.bin $OUTDIR/patched_fast_window.bin | head -n 200 > $OUTDIR/diff_fast.txt || true
+          cmp -l $OUTDIR/stock_stg1_window.bin $OUTDIR/patched_stg1_window.bin | head -n 200 > $OUTDIR/diff_stg1.txt || true
+
+          # Quick non-zero check for STAGE1 (sum of bytes)
+          python3 - <<PY > $OUTDIR/stage1_sum.txt
+          data = open("$OUTDIR/patched_stg1_window.bin","rb").read()
+          print(sum(bytearray(data)))
+          PY
+
+          echo "Wrote window dumps and diffs to $OUTDIR"
+
+          # Disassemble the patched window (attempt)
+          # We'll disassemble the patched_fast_window.bin as AArch64 with adjusted VMA = BL2 + (OFF_FAST - PRE)
+          ADJ_BASE=$(( $(python3 - <<PY
+          bl = int("${BL2_S}",0)
+          off = int("$OFF_FAST",0)
+          pre = int("$PRE",0)
+          print(bl + off - pre)
+          PY
+          ) ))
+          echo "Disassembling FAST window with VMA=$ADJ_BASE"
+          # objdump -b binary -m aarch64 -D --adjust-vma=<VMA> file
+          objdump -b binary -m aarch64 -D --adjust-vma=$ADJ_BASE $OUTDIR/patched_fast_window.bin > $OUTDIR/patched_fast_disasm.txt 2>/dev/null || true
+
+          # Also disassemble around STAGE1 region (adjust base accordingly)
+          ADJ_BASE2=$(( $(python3 - <<PY
+          bl = int("${BL2_S}",0)
+          off = int("$OFF_STG1",0)
+          pre = int("$PRE",0)
+          print(bl + off - pre)
+          PY
+          ) ))
+          echo "Disassembling STAGE1 window with VMA=$ADJ_BASE2"
+          objdump -b binary -m aarch64 -D --adjust-vma=$ADJ_BASE2 $OUTDIR/patched_stg1_window.bin > $OUTDIR/patched_stg1_disasm.txt 2>/dev/null || true
+
+          # Save brief summary
+          echo "Summary:" > $OUTDIR/summary.txt
+          echo "FAST window cmp diffs (first lines):" >> $OUTDIR/summary.txt
+          head -n 20 $OUTDIR/diff_fast.txt >> $OUTDIR/summary.txt || true
+          echo >> $OUTDIR/summary.txt
+          echo "STG1 window cmp diffs (first lines):" >> $OUTDIR/summary.txt
+          head -n 20 $OUTDIR/diff_stg1.txt >> $OUTDIR/summary.txt || true
+          echo >> $OUTDIR/summary.txt
+          echo "stage1 non-zero sum:" >> $OUTDIR/summary.txt
+          cat $OUTDIR/stage1_sum.txt >> $OUTDIR/summary.txt
+
+          # Fail if FAST region identical or STG1 is all zero
+          FAST_DIFF_LINES=$(wc -l < $OUTDIR/diff_fast.txt || echo 0)
+          STG1_SUM=$(cat $OUTDIR/stage1_sum.txt || echo 0)
+
+          if [ "$FAST_DIFF_LINES" -eq 0 ]; then
+            echo "FAIL: FASTBOOT_REGISTER region identical between stock and patched -> hook not applied"
+            echo "Check offsets in payload/devices/tetris.h or build logs"
+            exit 10
+          fi
+
+          if [ "$STG1_SUM" -eq 0 ]; then
+            echo "FAIL: STAGE1 region in patched file is all zeros -> payload not written"
+            exit 11
+          fi
+
+          echo "PASS: FAST region differs and STAGE1 region non-empty."
+          echo "Diagnostics written to $OUTDIR (hexdumps, diffs, disasm, summary)"
+
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          # Stage3 payloads (optional)
-          cp -av build/tetris/stage3/payload.elf artifacts/ 2>/dev/null || true
-          cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
-
-          # Stock bootloader
+          cp -av lk.patched artifacts/tetris-patched.bin
           cp -av bin/tetris.bin artifacts/tetris-stock.bin
-
-          # Patched bootloader (fenrir generates lk.patched)
-          if [ -f lk.patched ]; then
-            cp -av lk.patched artifacts/tetris-patched.bin
-            echo "✅ Copied lk.patched as artifacts/tetris-patched.bin"
-          else
-            echo "❌ ERROR: lk.patched not found, build failed"
-            exit 1
-          fi
-
-          # Reference header
           cp -av payload/devices/tetris.h artifacts/ 2>/dev/null || true
+          cp -av artifacts/verify/* artifacts/ 2>/dev/null || true
+          ls -lh artifacts
 
-      # 6️⃣ Verify fastboot patch region
-      - name: Verify FASTBOOT offsets
-        run: |
-          set -euo pipefail
-          HEADER="payload/devices/tetris.h"
-
-          # Extract values from header
-          BL2_EXT_BASE=$(grep 'BL2_EXT_BASE' "$HEADER" | awk '{print $3}')
-          STAGE1_BASE=$(grep 'STAGE1_BASE' "$HEADER" | awk '{print $3}')
-          FASTBOOT_REGISTER=$(grep 'FASTBOOT_REGISTER_ADDR' "$HEADER" | awk '{print $3}')
-          FASTBOOT_OKAY=$(grep 'FASTBOOT_OKAY_ADDR' "$HEADER" | awk '{print $3}')
-
-          echo "Header values:"
-          echo "  BL2_EXT_BASE        = $BL2_EXT_BASE"
-          echo "  STAGE1_BASE         = $STAGE1_BASE"
-          echo "  FASTBOOT_REGISTER   = $FASTBOOT_REGISTER"
-          echo "  FASTBOOT_OKAY       = $FASTBOOT_OKAY"
-
-          # Convert hex to decimal (strip 0x)
-          fastboot_reg_dec=$((FASTBOOT_REGISTER))
-          echo "Decimal FASTBOOT_REGISTER = $fastboot_reg_dec"
-
-          # Dump regions from stock & patched for comparison
-          echo "🔎 Comparing fastboot register region..."
-          hexdump -C artifacts/tetris-stock.bin | head -n 20 > artifacts/stock.hex
-          hexdump -C artifacts/tetris-patched.bin | head -n 20 > artifacts/patched.hex
-          cmp -l artifacts/tetris-stock.bin artifacts/tetris-patched.bin > artifacts/diff.txt || true
-
-          echo "Diff entries (if any):"
-          head -n 20 artifacts/diff.txt || true
-
-      # 7️⃣ Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: fenrir-tetris-artifacts
+          name: fenrir-tetris-deep-verify
           path: artifacts/**
