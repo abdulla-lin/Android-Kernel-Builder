@@ -1,4 +1,4 @@
-name: Build Fenrir (Tetris)
+name: Build & Verify Fenrir (Tetris)
 
 on:
   workflow_dispatch:
@@ -21,67 +21,75 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential wget python3 unzip binutils
 
-      # 3️⃣ Ensure correct bootloader exists
+      # 3️⃣ Ensure stock bootloader exists
       - name: Ensure bin/tetris.bin exists
         run: |
           if [ ! -f bin/tetris.bin ]; then
             echo "❌ ERROR: bin/tetris.bin not found! Place your LK image here."
             exit 1
           fi
-          echo "✅ bin/tetris.bin found"
+          echo "✅ Found stock bin/tetris.bin"
           ls -lh bin/tetris.bin
 
-      # 4️⃣ Inspect header values
-      - name: Inspect critical offsets
-        run: |
-          set -euo pipefail
-          HEADER="payload/devices/tetris.h"
-
-          echo "Header values:"
-          grep -E 'BASE|ADDR' "$HEADER" | while read -r line; do
-            name=$(echo "$line" | awk '{print $2}')
-            value=$(echo "$line" | awk '{print $3}')
-            echo "  $name = $value"
-          done
-
-          # helper: convert hex to decimal safely
-          to_dec() {
-            python3 -c "import sys; s=sys.argv[1]; print(int(s,0))" "$1"
-          }
-
-          BL2_EXT_BASE=0xFFFF000050700000
-          FASTBOOT_REGISTER_ADDR=0xFFFF0000507078DC
-          FASTBOOT_OKAY_ADDR=0xFFFF000050707C6C
-          STAGE1_BASE=0xFFFF000050777F60
-
-          echo "Decimal conversions:"
-          echo "  BL2_EXT_BASE         = $(to_dec $BL2_EXT_BASE)"
-          echo "  FASTBOOT_REGISTER    = $(to_dec $FASTBOOT_REGISTER_ADDR)"
-          echo "  FASTBOOT_OKAY        = $(to_dec $FASTBOOT_OKAY_ADDR)"
-          echo "  STAGE1_BASE          = $(to_dec $STAGE1_BASE)"
-
-      # 5️⃣ Build Fenrir payload
+      # 4️⃣ Build Fenrir payload
       - name: Build Fenrir payload
         run: |
           chmod +x build.sh
           ./build.sh tetris
 
-      # 6️⃣ Collect artifacts including patched bootloader
+      # 5️⃣ Collect artifacts
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
           # Stage3 payloads (optional)
           cp -av build/tetris/stage3/payload.elf artifacts/ 2>/dev/null || true
           cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
-          # Patched bootloader
+
+          # Stock bootloader
+          cp -av bin/tetris.bin artifacts/tetris-stock.bin
+
+          # Patched bootloader (fenrir generates lk.patched)
           if [ -f lk.patched ]; then
             cp -av lk.patched artifacts/tetris-patched.bin
-            echo "✅ Patched bootloader copied as artifacts/tetris-patched.bin"
+            echo "✅ Copied lk.patched as artifacts/tetris-patched.bin"
           else
-            echo "⚠️ WARNING: lk.patched not found, check build logs"
+            echo "❌ ERROR: lk.patched not found, build failed"
+            exit 1
           fi
+
           # Reference header
           cp -av payload/devices/tetris.h artifacts/ 2>/dev/null || true
+
+      # 6️⃣ Verify fastboot patch region
+      - name: Verify FASTBOOT offsets
+        run: |
+          set -euo pipefail
+          HEADER="payload/devices/tetris.h"
+
+          # Extract values from header
+          BL2_EXT_BASE=$(grep 'BL2_EXT_BASE' "$HEADER" | awk '{print $3}')
+          STAGE1_BASE=$(grep 'STAGE1_BASE' "$HEADER" | awk '{print $3}')
+          FASTBOOT_REGISTER=$(grep 'FASTBOOT_REGISTER_ADDR' "$HEADER" | awk '{print $3}')
+          FASTBOOT_OKAY=$(grep 'FASTBOOT_OKAY_ADDR' "$HEADER" | awk '{print $3}')
+
+          echo "Header values:"
+          echo "  BL2_EXT_BASE        = $BL2_EXT_BASE"
+          echo "  STAGE1_BASE         = $STAGE1_BASE"
+          echo "  FASTBOOT_REGISTER   = $FASTBOOT_REGISTER"
+          echo "  FASTBOOT_OKAY       = $FASTBOOT_OKAY"
+
+          # Convert hex to decimal (strip 0x)
+          fastboot_reg_dec=$((FASTBOOT_REGISTER))
+          echo "Decimal FASTBOOT_REGISTER = $fastboot_reg_dec"
+
+          # Dump regions from stock & patched for comparison
+          echo "🔎 Comparing fastboot register region..."
+          hexdump -C artifacts/tetris-stock.bin | head -n 20 > artifacts/stock.hex
+          hexdump -C artifacts/tetris-patched.bin | head -n 20 > artifacts/patched.hex
+          cmp -l artifacts/tetris-stock.bin artifacts/tetris-patched.bin > artifacts/diff.txt || true
+
+          echo "Diff entries (if any):"
+          head -n 20 artifacts/diff.txt || true
 
       # 7️⃣ Upload artifacts
       - name: Upload artifacts
