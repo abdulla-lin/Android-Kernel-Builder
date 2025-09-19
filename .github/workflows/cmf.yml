@@ -1,16 +1,15 @@
-name: GKI 6.1 Kernel Build
+name: Tetris Kernel Build
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build GKI 6.1 Kernel + Modules
+    name: Build Tetris Kernel + Device Modules
     runs-on: ubuntu-22.04
     env:
-      CCACHE_COMPILERCHECK: "$CC -dumpmachine; $CC -dumpversion"
-      CCACHE_NOHASHDIR: "true"
-      CCACHE_HARDLINK: "true"
+      MAKEFLAGS: "-j$(nproc --all)"
+      MAX_MEM: 4096
 
     steps:
       - name: Maximize build space
@@ -23,72 +22,69 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      - name: Setup dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y git wget curl build-essential bc bison flex \
             lz4 libssl-dev libncurses5-dev python3 python3-pip ccache unzip \
             zip clang llvm llvm-dev lld jq repo
 
-      - name: Install Bazelisk
-        uses: actions/setup-bazelisk@v3
-        with:
-          version: '6.0.0'
-
-      - name: Clone GKI 6.1 kernel source
+      - name: Initialize repo
         run: |
-          git clone --depth=1 --branch Tetris-2 \
-            https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git \
-            $GITHUB_WORKSPACE/android-kernel
+          mkdir android-kernel && cd android-kernel
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --repo-rev=v2.16
 
-      - name: Clone device modules
+      - name: Add local manifest
         run: |
-          if [ -d "$GITHUB_WORKSPACE/android-kernel/common" ]; then
-            cd $GITHUB_WORKSPACE/android-kernel/common
-            git clone --depth=1 -b mt6878/Tetris/u \
-              https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878 device-modules
-          fi
+          mkdir -p android-kernel/.repo/local_manifests
+          cat << 'EOF' > android-kernel/.repo/local_manifests/local_manifest.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote fetch="https://github.com" name="github"/>
+  <remove-project name="kernel/common"/>
+  <remove-project name="kernel/common-modules/virtual-device"/>
+  <remove-project name="kernel/build"/>
+  <project path="build/kernel" name="kernel/build" >
+    <linkfile src="kleaf/bazel.sh" dest="tools/bazel" />
+    <linkfile src="build_test.sh" dest="build/build_test.sh" />
+    <linkfile src="config.sh" dest="build/config.sh" />
+  </project>
+  <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
+    <linkfile src="BUILD.bazel" dest="BUILD" />
+    <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
+  </project>
+  <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
+    <linkfile src="build.config.constants" dest="build.config.constants" />
+  </project>
+  <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
+    <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config" />
+  </project>
+  <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
+</manifest>
+EOF
 
-      - name: Clone vendor modules
+      - name: Repo sync
         run: |
-          if [ -d "$GITHUB_WORKSPACE/android-kernel/common" ]; then
-            cd $GITHUB_WORKSPACE/android-kernel/common
-            git clone --depth=1 -b mt6878/Tetris/u \
-              https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878 vendor-modules
-          fi
+          cd android-kernel
+          repo sync -c -j$(nproc --all) --no-tags
 
-      - name: Build GKI kernel
+      - name: Build device modules
         run: |
-          cd $GITHUB_WORKSPACE/android-kernel/common
-          bazel --local_ram_resources=4096 --local_cpu_resources=2 --jobs=2 \
-            run //common:kernel_aarch64_dist
-
-      - name: Build vendor modules (vendor_dlkm)
-        run: |
-          cd $GITHUB_WORKSPACE/android-kernel/common
-          bazel --local_ram_resources=4096 --local_cpu_resources=2 --jobs=2 \
-            run //common:vendor_dlkm
-
-      - name: Build device modules (system_dlkm)
-        run: |
-          cd $GITHUB_WORKSPACE/android-kernel/common
-          bazel --local_ram_resources=4096 --local_cpu_resources=2 --jobs=2 \
-            run //common:system_dlkm
+          cd android-kernel/kernel_device_modules-6.1
+          chmod +x build.sh
+          # Limit memory usage to prevent runner OOM
+          /usr/bin/env MAKEFLAGS="-j$(nproc --all)" ./build.sh
 
       - name: Collect artifacts
         run: |
           ART_DIR="$GITHUB_WORKSPACE/out-artifacts"
           mkdir -p "$ART_DIR"
-          cd $GITHUB_WORKSPACE/android-kernel/common
-          find bazel-bin/common -name "Image*" -exec cp {} "$ART_DIR"/ \;
-          find bazel-bin/common -name "vmlinux*" -exec cp {} "$ART_DIR"/ \;
-          find bazel-bin/common -name "*.img" -exec cp {} "$ART_DIR"/ \;
-          find bazel-bin/common -name "*.ko" -exec cp {} "$ART_DIR"/ \;
+          cp -r android-kernel/kernel_device_modules-6.1/out/* "$ART_DIR"/ || true
           cd "$ART_DIR"
-          zip -r gki-6.1-build.zip *
+          zip -r tetris-device-modules.zip *
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gki-6.1-nothing-mt6878
-          path: out-artifacts/gki-6.1-build.zip
+          name: tetris-device-modules
+          path: out-artifacts/tetris-device-modules.zip
