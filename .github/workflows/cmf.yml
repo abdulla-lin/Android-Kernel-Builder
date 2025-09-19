@@ -1,257 +1,84 @@
-name: Build & Deep Verify Fenrir (Tetris)
+name: GKI 6.1 Kernel Build
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+  build:
+    name: Build GKI 6.1 Kernel + Modules
+    runs-on: ubuntu-22.04
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      BAZEL_RAM: "--local_ram_resources=4096"
+      BAZEL_CPU: "--local_cpu_resources=2"
+      BAZEL_JOBS: "--jobs=2"
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
         with:
-          repository: abdulla-lin/fenrir
-          ref: main
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
 
-      - name: Install dependencies
+      - name: Setup dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential wget python3 unzip binutils xxd
+          sudo apt-get install -y git wget curl build-essential bc bison flex \
+            lz4 libssl-dev libncurses5-dev python3 python3-pip ccache unzip \
+            zip clang llvm llvm-dev lld jq repo
 
-      - name: Ensure stock LK exists
+      - name: Clone Google GKI 6.1 kernel source
         run: |
-          mkdir -p bin build/tetris/stage3 artifacts
-          if [ ! -f bin/tetris.bin ]; then
-            echo "ERROR: bin/tetris.bin (stock LK) not found. Upload your stock LK to bin/tetris.bin"
-            ls -la bin || true
-            exit 1
-          fi
-          echo "Found bin/tetris.bin"
-          ls -lh bin/tetris.bin
+          mkdir android-kernel && cd android-kernel
+          repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --repo-rev=v2.16
+          repo sync -c -j$(nproc --all) --no-tags
 
-      - name: Build Fenrir payload (explicit LK path)
+      - name: Clone device modules
         run: |
-          chmod +x build.sh
-          ./build.sh tetris bin/tetris.bin
+          cd $GITHUB_WORKSPACE/android-kernel/common
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878 device-modules
 
-      - name: Ensure patched output exists
+      - name: Clone vendor modules
         run: |
-          if [ ! -f lk.patched ]; then
-            echo "ERROR: lk.patched not found — build likely failed"
-            ls -la
-            exit 1
-          fi
-          echo "Found lk.patched"
-          ls -lh lk.patched
+          cd $GITHUB_WORKSPACE/android-kernel/common
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878 vendor-modules
 
-      - name: Read header defines to outputs
-        id: read_header
+      - name: Build GKI kernel with Bazel
         run: |
-          HEADER="payload/devices/tetris.h"
-          if [ ! -f "$HEADER" ]; then
-            echo "MISSING HEADER: $HEADER"
-            exit 1
-          fi
+          cd $GITHUB_WORKSPACE/android-kernel/common
+          tools/bazel run $BAZEL_RAM $BAZEL_CPU $BAZEL_JOBS //common:kernel_aarch64_dist
 
-          read_define() {
-            awk -v k="$1" '$0 ~ k {print $3; exit}' "$HEADER"
-          }
-
-          BL2_EXT_BASE=$(read_define BL2_EXT_BASE)
-          BL2_EXT_SIZE=$(read_define BL2_EXT_SIZE)
-          STAGE1_BASE=$(read_define STAGE1_BASE)
-          FAST_REG=$(read_define FASTBOOT_REGISTER_ADDR)
-          FAST_OK=$(read_define FASTBOOT_OKAY_ADDR)
-
-          echo "BL2_EXT_BASE=$BL2_EXT_BASE" >> $GITHUB_OUTPUT
-          echo "BL2_EXT_SIZE=$BL2_EXT_SIZE" >> $GITHUB_OUTPUT
-          echo "STAGE1_BASE=$STAGE1_BASE" >> $GITHUB_OUTPUT
-          echo "FAST_REG=$FAST_REG" >> $GITHUB_OUTPUT
-          echo "FAST_OK=$FAST_OK" >> $GITHUB_OUTPUT
-
-      - name: Compute offsets and dump regions (hex + disasm)
-        id: inspect
+      - name: Build vendor modules (vendor_dlkm)
         run: |
-          set -euo pipefail
+          cd $GITHUB_WORKSPACE/android-kernel/common
+          tools/bazel run $BAZEL_RAM $BAZEL_CPU $BAZEL_JOBS //common:vendor_dlkm
 
-          STOCK="bin/tetris.bin"
-          PATCHED="lk.patched"
-          OUTDIR="artifacts/verify"
-          mkdir -p "$OUTDIR"
-
-          # read values from workflow outputs
-          BL2_S="${{ steps.read_header.outputs.BL2_EXT_BASE }}"
-          BL2_SIZE_S="${{ steps.read_header.outputs.BL2_EXT_SIZE }}"
-          STG1_S="${{ steps.read_header.outputs.STAGE1_BASE }}"
-          FAST_REG_S="${{ steps.read_header.outputs.FAST_REG }}"
-          FAST_OK_S="${{ steps.read_header.outputs.FAST_OK }}"
-
-          echo "Header raw values:"
-          echo "  BL2_EXT_BASE = $BL2_S"
-          echo "  BL2_EXT_SIZE = $BL2_SIZE_S"
-          echo "  STAGE1_BASE  = $STG1_S"
-          echo "  FAST_REG     = $FAST_REG_S"
-          echo "  FAST_OK      = $FAST_OK_S"
-          echo
-
-          # Use Python for safe big-int arithmetic and to compute offsets (no shell overflow)
-          python3 - <<PY > $OUTDIR/offsets.txt
-          import sys
-          bl2 = sys.argv[1]
-          stg1 = sys.argv[2]
-          fast = sys.argv[3]
-          fast_ok = sys.argv[4] if len(sys.argv) > 4 else "0"
-          # parse
-          b = int(bl2,0)
-          s1 = int(stg1,0)
-          f = int(fast,0)
-          fok = int(fast_ok,0) if fast_ok else 0
-          off_fast = f - b
-          off_fast_ok = fok - b if fok else None
-          off_stg1 = s1 - b
-          print("BL2_BASE_DEC=%d" % b)
-          print("OFF_FAST_DEC=%d" % off_fast)
-          print("OFF_FAST_HEX=0x%X" % off_fast)
-          print("OFF_FAST_OK_DEC=%s" % (str(off_fast_ok) if off_fast_ok is not None else ""))
-          print("OFF_STG1_DEC=%d" % off_stg1)
-          print("OFF_STG1_HEX=0x%X" % off_stg1)
-          PY
-          python3 - <<PY
-           # print offsets for logs
-           print("Offsets computed (see artifacts/verify/offsets.txt for exact values)")
-           PY
-
-          cat $OUTDIR/offsets.txt
-
-          # read computed offsets back (simple parse)
-          OFF_FAST=$(awk -F= '/OFF_FAST_DEC/ {print $2}' $OUTDIR/offsets.txt | tr -d '\r\n')
-          OFF_STG1=$(awk -F= '/OFF_STG1_DEC/ {print $2}' $OUTDIR/offsets.txt | tr -d '\r\n')
-          OFF_FAST_OK_LINE=$(awk -F= '/OFF_FAST_OK_DEC/ {print $2}' $OUTDIR/offsets.txt | tr -d '\r\n')
-          if [ -n "$OFF_FAST_OK_LINE" ]; then
-            OFF_FAST_OK="$OFF_FAST_OK_LINE"
-          else
-            OFF_FAST_OK="-1"
-          fi
-
-          echo "Using file offsets:"
-          printf "  FAST_REG offset = %s (decimal)\n" "$OFF_FAST"
-          printf "  STAGE1  offset = %s (decimal)\n" "$OFF_STG1"
-          printf "  FAST_OK  offset = %s (decimal)\n" "$OFF_FAST_OK"
-
-          # ensure offsets are integer numbers
-          if ! echo "$OFF_FAST" | grep -E '^[0-9-]+' >/dev/null; then echo "Bad FAST offset"; exit 1; fi
-          if ! echo "$OFF_STG1" | grep -E '^[0-9-]+' >/dev/null; then echo "Bad STG1 offset"; exit 1; fi
-
-          STOCK_SZ=$(stat -c%s "$STOCK")
-          PATCHED_SZ=$(stat -c%s "$PATCHED")
-          echo "Stock size: $STOCK_SZ  Patched size: $PATCHED_SZ"
-          echo
-
-          # Sanity: offsets must be in-range for stock file
-          if [ "$OFF_FAST" -lt 0 ] || [ "$OFF_FAST" -ge "$STOCK_SZ" ]; then
-            echo "ERROR: FAST_REG offset $OFF_FAST out of stock file bounds (0..$((STOCK_SZ-1))). Aborting."
-            exit 2
-          fi
-          if [ "$OFF_STG1" -lt 0 ] || [ "$OFF_STG1" -ge "$STOCK_SZ" ]; then
-            echo "ERROR: STAGE1 offset $OFF_STG1 out of stock file bounds (0..$((STOCK_SZ-1))). Aborting."
-            exit 2
-          fi
-
-          # Dump small windows (32 bytes before -> 96 bytes after)
-          PRE=32
-          LEN=128
-
-          dd if="$STOCK"  bs=1 skip=$((OFF_FAST - PRE)) count=$((PRE + LEN)) 2>/dev/null > $OUTDIR/stock_fast_window.bin || true
-          dd if="$PATCHED" bs=1 skip=$((OFF_FAST - PRE)) count=$((PRE + LEN)) 2>/dev/null > $OUTDIR/patched_fast_window.bin || true
-
-          dd if="$STOCK"  bs=1 skip=$((OFF_STG1 - PRE)) count=$((PRE + LEN)) 2>/dev/null > $OUTDIR/stock_stg1_window.bin || true
-          dd if="$PATCHED" bs=1 skip=$((OFF_STG1 - PRE)) count=$((PRE + LEN)) 2>/dev/null > $OUTDIR/patched_stg1_window.bin || true
-
-          # Hexdumps for human inspection
-          hexdump -C $OUTDIR/stock_fast_window.bin > $OUTDIR/stock_fast.hex || true
-          hexdump -C $OUTDIR/patched_fast_window.bin > $OUTDIR/patched_fast.hex || true
-
-          hexdump -C $OUTDIR/stock_stg1_window.bin > $OUTDIR/stock_stg1.hex || true
-          hexdump -C $OUTDIR/patched_stg1_window.bin > $OUTDIR/patched_stg1.hex || true
-
-          # Compare region bytes and write cmp output (first 200 diffs)
-          cmp -l $OUTDIR/stock_fast_window.bin $OUTDIR/patched_fast_window.bin | head -n 200 > $OUTDIR/diff_fast.txt || true
-          cmp -l $OUTDIR/stock_stg1_window.bin $OUTDIR/patched_stg1_window.bin | head -n 200 > $OUTDIR/diff_stg1.txt || true
-
-          # Quick non-zero check for STAGE1 (sum of bytes)
-          python3 - <<PY > $OUTDIR/stage1_sum.txt
-          data = open("$OUTDIR/patched_stg1_window.bin","rb").read()
-          print(sum(bytearray(data)))
-          PY
-
-          echo "Wrote window dumps and diffs to $OUTDIR"
-
-          # Disassemble the patched window (attempt)
-          # We'll disassemble the patched_fast_window.bin as AArch64 with adjusted VMA = BL2 + (OFF_FAST - PRE)
-          ADJ_BASE=$(( $(python3 - <<PY
-          bl = int("${BL2_S}",0)
-          off = int("$OFF_FAST",0)
-          pre = int("$PRE",0)
-          print(bl + off - pre)
-          PY
-          ) ))
-          echo "Disassembling FAST window with VMA=$ADJ_BASE"
-          # objdump -b binary -m aarch64 -D --adjust-vma=<VMA> file
-          objdump -b binary -m aarch64 -D --adjust-vma=$ADJ_BASE $OUTDIR/patched_fast_window.bin > $OUTDIR/patched_fast_disasm.txt 2>/dev/null || true
-
-          # Also disassemble around STAGE1 region (adjust base accordingly)
-          ADJ_BASE2=$(( $(python3 - <<PY
-          bl = int("${BL2_S}",0)
-          off = int("$OFF_STG1",0)
-          pre = int("$PRE",0)
-          print(bl + off - pre)
-          PY
-          ) ))
-          echo "Disassembling STAGE1 window with VMA=$ADJ_BASE2"
-          objdump -b binary -m aarch64 -D --adjust-vma=$ADJ_BASE2 $OUTDIR/patched_stg1_window.bin > $OUTDIR/patched_stg1_disasm.txt 2>/dev/null || true
-
-          # Save brief summary
-          echo "Summary:" > $OUTDIR/summary.txt
-          echo "FAST window cmp diffs (first lines):" >> $OUTDIR/summary.txt
-          head -n 20 $OUTDIR/diff_fast.txt >> $OUTDIR/summary.txt || true
-          echo >> $OUTDIR/summary.txt
-          echo "STG1 window cmp diffs (first lines):" >> $OUTDIR/summary.txt
-          head -n 20 $OUTDIR/diff_stg1.txt >> $OUTDIR/summary.txt || true
-          echo >> $OUTDIR/summary.txt
-          echo "stage1 non-zero sum:" >> $OUTDIR/summary.txt
-          cat $OUTDIR/stage1_sum.txt >> $OUTDIR/summary.txt
-
-          # Fail if FAST region identical or STG1 is all zero
-          FAST_DIFF_LINES=$(wc -l < $OUTDIR/diff_fast.txt || echo 0)
-          STG1_SUM=$(cat $OUTDIR/stage1_sum.txt || echo 0)
-
-          if [ "$FAST_DIFF_LINES" -eq 0 ]; then
-            echo "FAIL: FASTBOOT_REGISTER region identical between stock and patched -> hook not applied"
-            echo "Check offsets in payload/devices/tetris.h or build logs"
-            exit 10
-          fi
-
-          if [ "$STG1_SUM" -eq 0 ]; then
-            echo "FAIL: STAGE1 region in patched file is all zeros -> payload not written"
-            exit 11
-          fi
-
-          echo "PASS: FAST region differs and STAGE1 region non-empty."
-          echo "Diagnostics written to $OUTDIR (hexdumps, diffs, disasm, summary)"
+      - name: Build device modules (system_dlkm)
+        run: |
+          cd $GITHUB_WORKSPACE/android-kernel/common
+          tools/bazel run $BAZEL_RAM $BAZEL_CPU $BAZEL_JOBS //common:system_dlkm
 
       - name: Collect artifacts
         run: |
-          mkdir -p artifacts
-          cp -av lk.patched artifacts/tetris-patched.bin
-          cp -av bin/tetris.bin artifacts/tetris-stock.bin
-          cp -av payload/devices/tetris.h artifacts/ 2>/dev/null || true
-          cp -av artifacts/verify/* artifacts/ 2>/dev/null || true
-          ls -lh artifacts
+          cd $GITHUB_WORKSPACE/android-kernel/common
+          mkdir -p $GITHUB_WORKSPACE/out-artifacts
+          # Kernel outputs
+          find bazel-bin/common -name "Image*" -exec cp {} $GITHUB_WORKSPACE/out-artifacts/ \;
+          find bazel-bin/common -name "vmlinux*" -exec cp {} $GITHUB_WORKSPACE/out-artifacts/ \;
+          find bazel-bin/common -name "*.img" -exec cp {} $GITHUB_WORKSPACE/out-artifacts/ \;
+          # Modules (.ko)
+          find bazel-bin/common -name "*.ko" -exec cp {} $GITHUB_WORKSPACE/out-artifacts/ \;
+          cd $GITHUB_WORKSPACE/out-artifacts
+          zip -r gki-6.1-build.zip *
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fenrir-tetris-deep-verify
-          path: artifacts/**
+          name: gki-6.1-nothing-mt6878
+          path: out-artifacts/gki-6.1-build.zip
