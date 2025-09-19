@@ -38,30 +38,30 @@ jobs:
         run: |
           mkdir -p android-kernel/.repo/local_manifests
           cat << 'EOF' > android-kernel/.repo/local_manifests/local_manifest.xml
-<?xml version="1.0" encoding="UTF-8"?>
-<manifest>
-  <remote fetch="https://github.com" name="github"/>
-  <remove-project name="kernel/common"/>
-  <remove-project name="kernel/common-modules/virtual-device"/>
-  <remove-project name="kernel/build"/>
-  <project path="build/kernel" name="kernel/build" >
-    <linkfile src="kleaf/bazel.sh" dest="tools/bazel" />
-    <linkfile src="build_test.sh" dest="build/build_test.sh" />
-    <linkfile src="config.sh" dest="build/config.sh" />
-  </project>
-  <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
-    <linkfile src="BUILD.bazel" dest="BUILD" />
-    <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
-  </project>
-  <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
-    <linkfile src="build.config.constants" dest="build.config.constants" />
-  </project>
-  <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
-    <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config" />
-  </project>
-  <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
-</manifest>
-EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <manifest>
+          <remote fetch="https://github.com" name="github"/>
+          <remove-project name="kernel/common"/>
+          <remove-project name="kernel/common-modules/virtual-device"/>
+          <remove-project name="kernel/build"/>
+          <project path="build/kernel" name="kernel/build" >
+          <linkfile src="kleaf/bazel.sh" dest="tools/bazel" />
+          <linkfile src="build_test.sh" dest="build/build_test.sh" />
+          <linkfile src="config.sh" dest="build/config.sh" />
+          </project>
+          <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
+          <linkfile src="BUILD.bazel" dest="BUILD" />
+          <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
+          </project>
+          <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
+          <linkfile src="build.config.constants" dest="build.config.constants" />
+          </project>
+          <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
+          <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config" />
+          </project>
+          <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
+          </manifest>
+          EOF
 
       - name: Repo sync
         run: |
