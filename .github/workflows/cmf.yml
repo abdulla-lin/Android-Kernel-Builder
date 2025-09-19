@@ -30,8 +30,8 @@ jobs:
             lz4 libssl-dev libncurses5-dev python3 python3-pip ccache unzip \
             zip clang llvm llvm-dev lld jq repo
 
-      - name: Install Bazel
-        uses: bazel/setup-bazel@v6
+      - name: Install Bazelisk
+        uses: actions/setup-bazelisk@v3
         with:
           version: '6.0.0'
 
