@@ -11,9 +11,6 @@ jobs:
       CCACHE_COMPILERCHECK: "$CC -dumpmachine; $CC -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
-      BAZEL_RAM: "--local_ram_resources=4096"
-      BAZEL_CPU: "--local_cpu_resources=2"
-      BAZEL_JOBS: "--jobs=2"
 
     steps:
       - name: Maximize build space
@@ -46,42 +43,48 @@ jobs:
 
       - name: Clone device modules
         run: |
-          cd $GITHUB_WORKSPACE/android-kernel/common
-          git clone --depth=1 -b mt6878/Tetris/u \
-            https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878 device-modules
+          if [ -d "$GITHUB_WORKSPACE/android-kernel/common" ]; then
+            cd $GITHUB_WORKSPACE/android-kernel/common
+            git clone --depth=1 -b mt6878/Tetris/u \
+              https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878 device-modules
+          fi
 
       - name: Clone vendor modules
         run: |
-          cd $GITHUB_WORKSPACE/android-kernel/common
-          git clone --depth=1 -b mt6878/Tetris/u \
-            https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878 vendor-modules
+          if [ -d "$GITHUB_WORKSPACE/android-kernel/common" ]; then
+            cd $GITHUB_WORKSPACE/android-kernel/common
+            git clone --depth=1 -b mt6878/Tetris/u \
+              https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878 vendor-modules
+          fi
 
-      - name: Build GKI kernel with Bazel
+      - name: Build GKI kernel
         run: |
           cd $GITHUB_WORKSPACE/android-kernel/common
-          tools/bazel run $BAZEL_RAM $BAZEL_CPU $BAZEL_JOBS //common:kernel_aarch64_dist
+          bazel --local_ram_resources=4096 --local_cpu_resources=2 --jobs=2 \
+            run //common:kernel_aarch64_dist
 
       - name: Build vendor modules (vendor_dlkm)
         run: |
           cd $GITHUB_WORKSPACE/android-kernel/common
-          tools/bazel run $BAZEL_RAM $BAZEL_CPU $BAZEL_JOBS //common:vendor_dlkm
+          bazel --local_ram_resources=4096 --local_cpu_resources=2 --jobs=2 \
+            run //common:vendor_dlkm
 
       - name: Build device modules (system_dlkm)
         run: |
           cd $GITHUB_WORKSPACE/android-kernel/common
-          tools/bazel run $BAZEL_RAM $BAZEL_CPU $BAZEL_JOBS //common:system_dlkm
+          bazel --local_ram_resources=4096 --local_cpu_resources=2 --jobs=2 \
+            run //common:system_dlkm
 
       - name: Collect artifacts
         run: |
+          ART_DIR="$GITHUB_WORKSPACE/out-artifacts"
+          mkdir -p "$ART_DIR"
           cd $GITHUB_WORKSPACE/android-kernel/common
-          mkdir -p $GITHUB_WORKSPACE/out-artifacts
-          # Kernel outputs
-          find bazel-bin/common -name "Image*" -exec cp {} $GITHUB_WORKSPACE/out-artifacts/ \;
-          find bazel-bin/common -name "vmlinux*" -exec cp {} $GITHUB_WORKSPACE/out-artifacts/ \;
-          find bazel-bin/common -name "*.img" -exec cp {} $GITHUB_WORKSPACE/out-artifacts/ \;
-          # Modules (.ko)
-          find bazel-bin/common -name "*.ko" -exec cp {} $GITHUB_WORKSPACE/out-artifacts/ \;
-          cd $GITHUB_WORKSPACE/out-artifacts
+          find bazel-bin/common -name "Image*" -exec cp {} "$ART_DIR"/ \;
+          find bazel-bin/common -name "vmlinux*" -exec cp {} "$ART_DIR"/ \;
+          find bazel-bin/common -name "*.img" -exec cp {} "$ART_DIR"/ \;
+          find bazel-bin/common -name "*.ko" -exec cp {} "$ART_DIR"/ \;
+          cd "$ART_DIR"
           zip -r gki-6.1-build.zip *
 
       - name: Upload artifact
