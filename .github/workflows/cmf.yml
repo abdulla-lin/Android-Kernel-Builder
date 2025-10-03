@@ -1,90 +1,87 @@
-name: Tetris Kernel Build
+name: Build Nothing Tetris Kernel (Kleaf)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Tetris Kernel + Device Modules
-    runs-on: ubuntu-22.04
-    env:
-      MAKEFLAGS: "-j$(nproc --all)"
-      MAX_MEM: 4096
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 8192
-          temp-reserve-mb: 2048
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
+      # 1️⃣ Checkout workflow repo
+      - name: Checkout workflow
+        uses: actions/checkout@v4
 
+      # 2️⃣ Install dependencies
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git wget curl build-essential bc bison flex \
-            lz4 libssl-dev libncurses5-dev python3 python3-pip ccache unzip \
-            zip clang llvm llvm-dev lld jq repo
-
-      - name: Initialize repo
+          sudo apt-get install -y \
+            bc bison build-essential cpio curl flex git libssl-dev \
+            libncurses5-dev zlib1g-dev libelf-dev dwarves \
+            wget unzip xz-utils tar clang lld llvm binutils \
+            python3 python3-pip openjdk-11-jdk zip
+      # 3️⃣ Clone kernel source
+      - name: Clone kernel source
         run: |
-          mkdir android-kernel && cd android-kernel
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --repo-rev=v2.16
-
-      - name: Add local manifest
+          mkdir -p kernel_build
+          git clone --depth=1 -b Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
+      # 4️⃣ Clone kernel device modules
+      - name: Clone device modules
         run: |
-          mkdir -p android-kernel/.repo/local_manifests
-          cat << 'EOF' > android-kernel/.repo/local_manifests/local_manifest.xml
-          <?xml version="1.0" encoding="UTF-8"?>
-          <manifest>
-          <remote fetch="https://github.com" name="github"/>
-          <remove-project name="kernel/common"/>
-          <remove-project name="kernel/common-modules/virtual-device"/>
-          <remove-project name="kernel/build"/>
-          <project path="build/kernel" name="kernel/build" >
-          <linkfile src="kleaf/bazel.sh" dest="tools/bazel" />
-          <linkfile src="build_test.sh" dest="build/build_test.sh" />
-          <linkfile src="config.sh" dest="build/config.sh" />
-          </project>
-          <project remote="github" name="Mashopy/kernel-build-bazel_mgk_rules" path="build/bazel_mgk_rules" revision="android-14-release-u3uc34.63-31-6">
-          <linkfile src="BUILD.bazel" dest="BUILD" />
-          <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
-          </project>
-          <project remote="github" name="NothingOSS/android_kernel_6.1_nothing_mt6878" path="kernel-6.1" revision="mt6878/Tetris/u">
-          <linkfile src="build.config.constants" dest="build.config.constants" />
-          </project>
-          <project remote="github" name="Mashopy/android_kernel_device_modules_6.1_nothing_mt6878" path="kernel_device_modules-6.1" revision="mt6878/Tetris/u">
-          <linkfile src="build.config.mtk_kernel_device_modules" dest="build.config" />
-          </project>
-          <project remote="github" name="NothingOSS/android_kernel_modules_nothing_mt6878" path="vendor/mediatek/kernel_modules" revision="mt6878/Tetris/u"/>
-          </manifest>
-          EOF
-
-      - name: Repo sync
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
+      # 5️⃣ Clone vendor kernel modules
+      - name: Clone vendor kernel modules
         run: |
-          cd android-kernel
-          repo sync -c -j$(nproc --all) --no-tags
-
-      - name: Build device modules
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
+      # 6️⃣ Fix build.config paths
+      - name: Fix build.config paths
         run: |
-          cd android-kernel/kernel_device_modules-6.1
-          chmod +x build.sh
-          # Limit memory usage to prevent runner OOM
-          /usr/bin/env MAKEFLAGS="-j$(nproc --all)" ./build.sh
-
+          cd kernel_build/kernel_device_modules-6.1
+          # Copy build.config to root (for _setup_env.sh)
+          cp build.config.mtk_kernel_device_modules build.config
+          # Copy to nested folder (for build.sh)
+          mkdir -p kernel_device_modules-6.1
+          cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
+          echo "✅ build.config fixed at root and nested folder"
+      - name: Build kernel
+        run: |
+         cd kernel_build/kernel_device_modules-6.1
+         # Limit parallel jobs to 2 to avoid segfaults on GitHub Actions
+           export MAKEFLAGS="-j2"
+           export CLANG_MAX_JOBS=2
+           bash build.sh
+      # 8️⃣ Collect artifacts
       - name: Collect artifacts
         run: |
-          ART_DIR="$GITHUB_WORKSPACE/out-artifacts"
-          mkdir -p "$ART_DIR"
-          cp -r android-kernel/kernel_device_modules-6.1/out/* "$ART_DIR"/ || true
-          cd "$ART_DIR"
-          zip -r tetris-device-modules.zip *
-
-      - name: Upload artifacts
+          mkdir -p artifacts
+          cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
+          cp kernel_build/out/android14-6.1/dist/*.img artifacts/ || true
+          cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
+          cd artifacts && zip -r ../kernel_artifacts.zip *
+      # 9️⃣ Upload kernel artifacts
+      - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tetris-device-modules
-          path: out-artifacts/tetris-device-modules.zip
+          name: kernel_artifacts
+          path: kernel_artifacts.zip
+
+      # 🔟 Prepare AnyKernel3 ZIP
+      - name: Prepare AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
+          cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
+      # 1️⃣1️⃣ Pack AnyKernel3 ZIP
+      - name: Pack AnyKernel3 flashable ZIP
+        run: |
+          cd AnyKernel3
+          zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
+      # 1️⃣2️⃣ Upload AnyKernel3 ZIP
+      - name: Upload AnyKernel3 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: CMF_Kernel-Flashable-ZIP
+          path: CMF_Kernel-6.1-*.zip
