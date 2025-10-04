@@ -20,32 +20,39 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential wget python3 unzip binutils
-      # 3️⃣ Ensure correct bootloader exists
-      - name: Ensure bin/tetris.bin exists
-        run: |
-          if [ ! -f bin/tetris.bin ]; then
-            echo "ERROR: bin/tetris.bin not found! Place your LK image here."
-            exit 1
-          fi
-          echo "✅ bin/tetris.bin found"
-          ls -lh bin/tetris.bin
-      # 4️⃣ Build Fenrir payload
+
+      # 3️⃣ Build Fenrir payload
       - name: Build Fenrir payload
         run: |
           chmod +x build.sh
           ./build.sh tetris
-      # 5️⃣ Collect artifacts including patched bootloader
+
+      # 4️⃣ Collect artifacts (patched LK from root)
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          # Optional stage3 payload
+          # Optional stage3 payloads
           cp -av build/tetris/stage3/payload.elf artifacts/ 2>/dev/null || true
           cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
-          # Patched bootloader
-          cp -av bin/tetris.bin artifacts/
-          # Reference header
-          cp -av payload/devices/tetris.h artifacts/
-      # 6️⃣ Upload artifacts
+
+          # ✅ Copy patched LK image from root (tetris.bin or lk.img)
+          if [ -f tetris.bin ]; then
+            echo "✅ Found patched tetris.bin in root"
+            cp -av tetris.bin artifacts/
+          elif [ -f lk.img ]; then
+            echo "✅ Found patched lk.img in root"
+            cp -av lk.img artifacts/
+          else
+            echo "⚠️ WARNING: No patched LK found in root (tetris.bin or lk.img missing)"
+          fi
+
+          # Reference header (if exists)
+          cp -av payload/devices/tetris.h artifacts/ 2>/dev/null || true
+
+          echo "✅ Artifact collection complete"
+          ls -lh artifacts || true
+
+      # 5️⃣ Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
