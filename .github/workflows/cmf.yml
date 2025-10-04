@@ -27,26 +27,26 @@ jobs:
           chmod +x build.sh
           ./build.sh tetris
 
-      # 4️⃣ Collect artifacts (patched LK: lk.patched in repo root)
+      # 4️⃣ Collect artifacts (patched LK: tetris-fenrir.bin in repo root)
       - name: Collect artifacts
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          # Optional stage3 payloads (if produced by the build)
+          # Optional stage3 payloads (if produced)
           cp -av build/tetris/stage3/payload.elf artifacts/ 2>/dev/null || true
           cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
 
-          # Copy patched LK image produced by the build (lk.patched in repo root)
-          if [ -f lk.patched ]; then
-            echo "✅ Found lk.patched in repository root — copying to artifacts/"
-            cp -av lk.patched artifacts/
+          # ✅ Copy patched LK image from root
+          if [ -f tetris-fenrir.bin ]; then
+            echo "✅ Found patched bootloader: tetris-fenrir.bin"
+            cp -av tetris-fenrir.bin artifacts/
           else
-            echo "❌ ERROR: lk.patched not found in repository root after build!"
-            echo "Make sure your build script writes the patched bootloader to ./lk.patched"
+            echo "❌ ERROR: tetris-fenrir.bin not found in repository root after build!"
+            echo "Make sure your build script writes the patched bootloader to ./tetris-fenrir.bin"
             exit 1
           fi
 
-          # Reference header (optional)
+          # Reference header (if exists)
           cp -av payload/devices/tetris.h artifacts/ 2>/dev/null || true
 
           echo "✅ Artifacts collected:"
