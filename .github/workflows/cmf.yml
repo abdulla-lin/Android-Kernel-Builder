@@ -15,7 +15,7 @@ jobs:
           repository: abdulla-lin/fenrir
           ref: patch-1
 
-      # 2️⃣ Install dependencies
+      # 2️⃣ Install build dependencies
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -27,29 +27,29 @@ jobs:
           chmod +x build.sh
           ./build.sh tetris
 
-      # 4️⃣ Collect artifacts (patched LK from root)
+      # 4️⃣ Collect artifacts (patched LK: lk.patched in repo root)
       - name: Collect artifacts
         run: |
+          set -euo pipefail
           mkdir -p artifacts
-          # Optional stage3 payloads
+          # Optional stage3 payloads (if produced by the build)
           cp -av build/tetris/stage3/payload.elf artifacts/ 2>/dev/null || true
           cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
 
-          # ✅ Copy patched LK image from root (tetris.bin or lk.img)
-          if [ -f tetris.bin ]; then
-            echo "✅ Found patched tetris.bin in root"
-            cp -av tetris.bin artifacts/
-          elif [ -f lk.img ]; then
-            echo "✅ Found patched lk.img in root"
-            cp -av lk.img artifacts/
+          # Copy patched LK image produced by the build (lk.patched in repo root)
+          if [ -f lk.patched ]; then
+            echo "✅ Found lk.patched in repository root — copying to artifacts/"
+            cp -av lk.patched artifacts/
           else
-            echo "⚠️ WARNING: No patched LK found in root (tetris.bin or lk.img missing)"
+            echo "❌ ERROR: lk.patched not found in repository root after build!"
+            echo "Make sure your build script writes the patched bootloader to ./lk.patched"
+            exit 1
           fi
 
-          # Reference header (if exists)
+          # Reference header (optional)
           cp -av payload/devices/tetris.h artifacts/ 2>/dev/null || true
 
-          echo "✅ Artifact collection complete"
+          echo "✅ Artifacts collected:"
           ls -lh artifacts || true
 
       # 5️⃣ Upload artifacts
