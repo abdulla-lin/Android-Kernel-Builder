@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     # ✅ Use your self-hosted runner labeled "serverhive"
-    runs-on: [self-hosted, serverhive]
+    runs-on: self-hosted
 
     steps:
       # 1️⃣ Checkout workflow repo
