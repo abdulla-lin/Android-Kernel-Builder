@@ -1,42 +1,47 @@
-name: Build Nothing Tetris Kernel (Non-Root)
+name: Build Nothing Tetris Kernel (Kleaf)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: self-hosted
-
-    env:
-      # Paths to local tools in your home directory
-      JAVA_HOME: ${{ github.workspace }}/tools/jdk
-      PATH: ${{ github.workspace }}/tools/jdk/bin:${{ github.workspace }}/tools/python/bin:$PATH
+    runs-on: [self-hosted, serverhive]
 
     steps:
       # 1️⃣ Checkout the repo
-      - name: Checkout workflow
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup JDK (user-space)
-      - name: Setup Java
+      # 2️⃣ Setup user-space tools (tar, unzip, xz, wget, curl)
+      - name: Setup user-space tools
         run: |
-          mkdir -p $HOME/tools/jdk
-          if [ ! -d "$HOME/tools/jdk/bin" ]; then
-            curl -L -o openjdk.tar.gz https://download.java.net/java/GA/jdk11/13/GPL/openjdk-11.0.20_linux-x64_bin.tar.gz
-            tar -xzf openjdk.tar.gz -C $HOME/tools/jdk --strip-components=1
-          fi
-          java -version
+          mkdir -p $HOME/tools/bin
+          export PATH=$HOME/tools/bin:$PATH
 
-      # 3️⃣ Setup Python (user-space)
-      - name: Setup Python
-        run: |
-          mkdir -p $HOME/tools/python
-          if [ ! -d "$HOME/tools/python/bin" ]; then
-            curl -L -o python.tar.xz https://www.python.org/ftp/python/3.12.2/Python-3.12.2.tgz
-            tar -xzf python.tar.xz -C $HOME/tools/python --strip-components=1
+          # Check tar
+          if ! command -v tar &> /dev/null; then
+            echo "Installing GNU tar in user-space..."
+            wget https://ftp.gnu.org/gnu/tar/tar-latest.tar.gz -O $HOME/tools/tar.tar.gz
+            mkdir -p $HOME/tools/tar_build
+            tar -xf $HOME/tools/tar.tar.gz -C $HOME/tools/tar_build --strip-components=1
+            cd $HOME/tools/tar_build
+            ./configure --prefix=$HOME/tools
+            make
+            make install
           fi
-          python3 --version
-          pip3 install --user --upgrade pip
+
+          # Minimal check for unzip
+          if ! command -v unzip &> /dev/null; then
+            sudo apt-get install unzip -y || echo "No sudo, please pre-install manually"
+          fi
+
+          echo "PATH=$PATH"
+
+      # 3️⃣ Install Java and Python in user-space (optional if not installed)
+      - name: Verify Java/Python
+        run: |
+          java -version || echo "Please install OpenJDK 11 in user-space"
+          python3 --version || echo "Please install Python3"
 
       # 4️⃣ Clone kernel source
       - name: Clone kernel source
@@ -49,15 +54,20 @@ jobs:
         run: |
           git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
 
-      # 6️⃣ Fix build.config paths
-      - name: Fix build.config
+      # 6️⃣ Clone vendor kernel modules
+      - name: Clone vendor kernel modules
+        run: |
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
+
+      # 7️⃣ Fix build.config paths
+      - name: Fix build.config paths
         run: |
           cd kernel_build/kernel_device_modules-6.1
           cp build.config.mtk_kernel_device_modules build.config
           mkdir -p kernel_device_modules-6.1
           cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
 
-      # 7️⃣ Build kernel (user-space)
+      # 8️⃣ Build kernel
       - name: Build kernel
         run: |
           cd kernel_build/kernel_device_modules-6.1
@@ -65,7 +75,7 @@ jobs:
           export CLANG_MAX_JOBS=2
           bash build.sh
 
-      # 8️⃣ Collect artifacts
+      # 9️⃣ Collect artifacts
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
@@ -74,9 +84,31 @@ jobs:
           cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
           cd artifacts && zip -r ../kernel_artifacts.zip *
 
-      # 9️⃣ Upload kernel artifacts
+      # 🔟 Upload kernel artifacts
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel_artifacts
           path: kernel_artifacts.zip
+
+      # 1️⃣1️⃣ Prepare AnyKernel3 ZIP
+      - name: Prepare AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
+          cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
+
+      # 1️⃣2️⃣ Pack AnyKernel3 ZIP
+      - name: Pack AnyKernel3 flashable ZIP
+        run: |
+          cd AnyKernel3
+          zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
+
+      # 1️⃣3️⃣ Upload AnyKernel3 ZIP
+      - name: Upload AnyKernel3 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: CMF_Kernel-Flashable-ZIP
+          path: CMF_Kernel-6.1-*.zip
