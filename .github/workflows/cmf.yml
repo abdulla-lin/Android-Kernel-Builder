@@ -1,119 +1,82 @@
-name: Build Nothing Tetris Kernel (No Sudo)
+name: Build Nothing Tetris Kernel (Kleaf)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: self-hosted
-    timeout-minutes: 360
-
+    runs-on: self-hoster
+    permissions:
+      contents: write
     env:
-      WORKDIR: $HOME/kernel_build
-      OUTDIR: $HOME/kernel_build/out
-      CCACHE_DIR: $HOME/.ccache
+      WORKDIR: ${{ github.workspace }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout device modules repo
+        uses: actions/checkout@v4
 
-      - name: Prep dirs and ccache
+      - name: Clone kernel and vendor modules
         run: |
           set -eux
-          mkdir -p "$WORKDIR" "$OUTDIR" "$CCACHE_DIR"
-          command -v ccache && ccache -M 50G || true
-
-      - name: Fetch prebuilt LLVM/Clang (user space)
-        run: |
-          set -eux
-          cd "$WORKDIR"
-          # Proton Clang example (adjust if you use another)
-          URL=https://github.com/kdrag0n/proton-clang/releases/download/2024.08.18/proton-clang-20240818.tar.zst
-          # Download with curl/wget/python fallback
-          if command -v curl >/dev/null 2>&1; then curl -L -o clang.tar.zst "$URL"; \
-          elif command -v wget >/dev/null 2>&1; then wget -O clang.tar.zst "$URL"; \
-          else python3 - <<'PY'
-import urllib.request
-urllib.request.urlretrieve("https://github.com/kdrag0n/proton-clang/releases/download/2024.08.18/proton-clang-20240818.tar.zst","clang.tar.zst")
-PY
-          fi
-          mkdir -p toolchain
-          # Extract .tar.zst
-          tar --zstd -xf clang.tar.zst -C toolchain
-          echo "$WORKDIR/toolchain/bin" >> $GITHUB_PATH
-          echo "PATH=$WORKDIR/toolchain/bin:$PATH" >> $GITHUB_ENV
-          test -x "$WORKDIR/toolchain/bin/clang"
-
-      - name: Clone kernel source
-        run: |
-          set -eux
-          cd "$WORKDIR"
           git clone --depth=1 -b Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel-6.1
-
-      - name: Clone device modules
-        run: |
-          set -eux
-          cd "$WORKDIR"
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_device_modules-6.1
-
-      - name: Clone vendor kernel modules
-        run: |
-          set -eux
-          cd "$WORKDIR"
           mkdir -p vendor/mediatek
           git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git vendor/mediatek/kernel_modules
+          ln -s kernel-6.1 kernel- || true
 
-      - name: Fix build.config paths for Kleaf script
+      - name: Install Bazelisk (user-space)
         run: |
           set -eux
-          cd "$WORKDIR"/kernel_device_modules-6.1
-          # Ensure the file build.sh reads exists at repo root
-          if [ -f build.config.mtk_kernel_device_modules ]; then
-            cp -f build.config.mtk_kernel_device_modules build.config
+          curl -L https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64 -o bazel
+          chmod +x bazel
+          echo "$PWD" >> $GITHUB_PATH
+
+      - name: Bazel cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel
+            ~/.cache/bazelisk
+          key: bazel-${{ runner.os }}-${{ hashFiles('**/WORKSPACE', '**/*.bzl', '**/BUILD*') }}
+          restore-keys: |
+            bazel-${{ runner.os }}-
+
+      - name: Prepare repo Bazel wrapper (optional)
+        run: |
+          set -eux
+          if [ -x ./build/bazel/prepare.sh ]; then
+            ./build/bazel/prepare.sh || true
           fi
-          # Also provide nested path if script expects it
-          mkdir -p kernel_device_modules-6.1
-          cp -f build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk || true
 
-      - name: Build kernel (no sudo)
+      - name: Build dist target (Kleaf)
         run: |
           set -eux
-          cd "$WORKDIR"/kernel_device_modules-6.1
-          export PATH="$WORKDIR/toolchain/bin:$PATH"
-          export CCACHE_DIR="$CCACHE_DIR"
-          export CC="clang"
-          export LLVM=1 LLVM_IAS=1
-          export MAKEFLAGS="-j$(nproc)"
-          export CLANG_MAX_JOBS=$(nproc)
-          bash build.sh
+          if [ -x ./build/bazel/bin/bazelisk ]; then
+            ./build/bazel/bin/bazelisk build //common:dist --config=fast
+          else
+            ./bazel build //common:dist --config=fast
+          fi
 
-      - name: Collect artifacts
+      - name: Locate and package artifacts
         run: |
           set -eux
-          mkdir -p "$WORKDIR/artifacts"
-          cp -v $WORKDIR/out/android14-6.1/dist/Image* "$WORKDIR/artifacts/" || true
-          cp -v $WORKDIR/out/android14-6.1/dist/*.img "$WORKDIR/artifacts/" || true
-          cp -rv $WORKDIR/out/android14-6.1/dist/modules "$WORKDIR/artifacts/" || true
-          (cd "$WORKDIR/artifacts" && zip -r ../kernel_artifacts.zip .)
+          mkdir -p artifacts
+          # Probe common Kleaf dist locations
+          find "$PWD" -maxdepth 6 -type d -name dist -print || true
+          cp -v out/**/dist/Image* artifacts/ 2>/dev/null || true
+          cp -v out/**/dist/*.img artifacts/ 2>/dev/null || true
+          cp -rv out/**/dist/modules artifacts/ 2>/dev/null || true
+          # Some trees place outputs under kernel-6.1/out
+          cp -v kernel-6.1/out/**/dist/Image* artifacts/ 2>/dev/null || true
+          cp -v kernel-6.1/out/**/dist/*.img artifacts/ 2>/dev/null || true
+          cp -rv kernel-6.1/out/**/dist/modules artifacts/ 2>/dev/null || true
+          cd artifacts && zip -r ../kernel_artifacts.zip . || true
+          echo "Zipped at $PWD/../kernel_artifacts.zip"
 
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel_artifacts
-          path: ${{ env.WORKDIR }}/kernel_artifacts.zip
-
-      - name: AnyKernel3 packaging
-        run: |
-          set -eux
-          cd "$WORKDIR"
-          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-          cp -v $WORKDIR/out/android14-6.1/dist/Image* AnyKernel3/ || true
-          cp -v $WORKDIR/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
-          cp -v $WORKDIR/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
-          cp -v $WORKDIR/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
-          (cd AnyKernel3 && zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip .)
-
-      - name: Upload AnyKernel3 ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: CMF_Kernel-Flashable-ZIP
-          path: ${{ env.WORKDIR }}/CMF_Kernel-6.1-*.zip
+          path: |
+            kernel_artifacts.zip
+            artifacts/**
+          if-no-files-found: warn
