@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, serverhive]
+    runs-on: self-hosted
     timeout-minutes: 360
 
     env:
