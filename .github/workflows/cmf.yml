@@ -1,60 +1,95 @@
-name: Build Fenrir (Tetris)
+name: Build Nothing Tetris Kernel (Kleaf)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # ✅ Use your self-hosted runner labeled "serverhive"
+    runs-on: [self-hosted, serverhive]
 
     steps:
-      # 1️⃣ Checkout repo
-      - name: Checkout repo
+      # 1️⃣ Checkout workflow repo
+      - name: Checkout workflow
         uses: actions/checkout@v4
-        with:
-          repository: abdulla-lin/fenrir
-          ref: patch-2
 
-      # 2️⃣ Install build dependencies
-      - name: Install build dependencies
+      # 2️⃣ Install dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential wget python3 unzip binutils
+          sudo apt-get install -y \
+            bc bison build-essential cpio curl flex git libssl-dev \
+            libncurses5-dev zlib1g-dev libelf-dev dwarves \
+            wget unzip xz-utils tar clang lld llvm binutils \
+            python3 python3-pip openjdk-11-jdk zip
 
-      # 3️⃣ Build Fenrir payload
-      - name: Build Fenrir payload
+      # 3️⃣ Clone kernel source
+      - name: Clone kernel source
         run: |
-          chmod +x build.sh
-          ./build.sh tetris
+          mkdir -p kernel_build
+          git clone --depth=1 -b Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
 
-      # 4️⃣ Collect artifacts (patched LK: tetris-fenrir.bin in repo root)
+      # 4️⃣ Clone kernel device modules
+      - name: Clone device modules
+        run: |
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
+
+      # 5️⃣ Clone vendor kernel modules
+      - name: Clone vendor kernel modules
+        run: |
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
+
+      # 6️⃣ Fix build.config paths
+      - name: Fix build.config paths
+        run: |
+          cd kernel_build/kernel_device_modules-6.1
+          cp build.config.mtk_kernel_device_modules build.config
+          mkdir -p kernel_device_modules-6.1
+          cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
+          echo "✅ build.config fixed at root and nested folder"
+
+      # 7️⃣ Build kernel
+      - name: Build kernel
+        run: |
+          cd kernel_build/kernel_device_modules-6.1
+          export MAKEFLAGS="-j$(nproc)"
+          export CLANG_MAX_JOBS=$(nproc)
+          bash build.sh
+
+      # 8️⃣ Collect artifacts
       - name: Collect artifacts
         run: |
-          set -euo pipefail
           mkdir -p artifacts
-          # Optional stage3 payloads (if produced)
-          cp -av build/tetris/stage3/payload.elf artifacts/ 2>/dev/null || true
-          cp -av build/tetris/stage3/payload.bin artifacts/ 2>/dev/null || true
+          cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
+          cp kernel_build/out/android14-6.1/dist/*.img artifacts/ || true
+          cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
+          cd artifacts && zip -r ../kernel_artifacts.zip *
 
-          # ✅ Copy patched LK image from root
-          if [ -f tetris-fenrir.bin ]; then
-            echo "✅ Found patched bootloader: tetris-fenrir.bin"
-            cp -av tetris-fenrir.bin artifacts/
-          else
-            echo "❌ ERROR: tetris-fenrir.bin not found in repository root after build!"
-            echo "Make sure your build script writes the patched bootloader to ./tetris-fenrir.bin"
-            exit 1
-          fi
-
-          # Reference header (if exists)
-          cp -av payload/devices/tetris.h artifacts/ 2>/dev/null || true
-
-          echo "✅ Artifacts collected:"
-          ls -lh artifacts || true
-
-      # 5️⃣ Upload artifacts
-      - name: Upload artifacts
+      # 9️⃣ Upload kernel artifacts
+      - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: fenrir-tetris-artifacts
-          path: artifacts/**
+          name: kernel_artifacts
+          path: kernel_artifacts.zip
+
+      # 🔟 Prepare AnyKernel3 ZIP
+      - name: Prepare AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
+          cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
+          cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
+
+      # 1️⃣1️⃣ Pack AnyKernel3 ZIP
+      - name: Pack AnyKernel3 flashable ZIP
+        run: |
+          cd AnyKernel3
+          zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
+
+      # 1️⃣2️⃣ Upload AnyKernel3 ZIP
+      - name: Upload AnyKernel3 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: CMF_Kernel-Flashable-ZIP
+          path: CMF_Kernel-6.1-*.zip
