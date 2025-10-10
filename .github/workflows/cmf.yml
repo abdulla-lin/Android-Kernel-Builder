@@ -1,96 +1,98 @@
-name: Build Nothing Tetris Kernel (Kleaf)
+name: Build Nothing Tetris Kernel (No Sudo)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: [self-hosted, serverhive]
+    timeout-minutes: 360
+
+    env:
+      WORKDIR: $HOME/kernel_build
+      OUTDIR: $HOME/kernel_build/out
+      CCACHE_DIR: $HOME/.ccache
+
     steps:
-      # 1️⃣ Checkout the repository
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 2️⃣ Setup Python (no sudo needed)
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
+      - name: Prep dirs and ccache
+        run: |
+          mkdir -p "$WORKDIR" "$OUTDIR" "$CCACHE_DIR"
+          which ccache && ccache -M 50G || true
 
-      # 3️⃣ Setup Java (no sudo needed)
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '11'
+      - name: Fetch prebuilt LLVM/Clang and tools (user space)
+        run: |
+          set -eux
+          cd "$WORKDIR"
+          # Proton Clang example (adjust version if needed)
+          curl -L -o clang.tar.gz https://github.com/kdrag0n/proton-clang/releases/download/2024.08.18/proton-clang-20240818.tar.zst || \
+          wget -O clang.tar.zst https://github.com/kdrag0n/proton-clang/releases/download/2024.08.18/proton-clang-20240818.tar.zst
+          # handle either curl or wget file name
+          fname=$(ls clang.tar.*)
+          mkdir -p toolchain && tar --zstd -xf "$fname" -C toolchain
+          echo "$WORKDIR/toolchain/bin" >> $GITHUB_PATH
+          echo "PATH=$WORKDIR/toolchain/bin:$PATH" >> $GITHUB_ENV
 
-      # 4️⃣ Clone kernel source
       - name: Clone kernel source
         run: |
-          mkdir -p kernel_build
-          git clone --depth=1 -b Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel_build/kernel-6.1
+          cd "$WORKDIR"
+          git clone --depth=1 -b Tetris-2 https://github.com/abdulla-lin/android_kernel_6.1_nothing_mt6878.git kernel-6.1
 
-      # 5️⃣ Clone device kernel modules
       - name: Clone device modules
         run: |
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_build/kernel_device_modules-6.1
+          cd "$WORKDIR"
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_device_modules_6.1_nothing_mt6878.git kernel_device_modules-6.1
 
-      # 6️⃣ Clone vendor kernel modules
       - name: Clone vendor kernel modules
         run: |
-          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git kernel_build/vendor/mediatek/kernel_modules
+          cd "$WORKDIR"
+          git clone --depth=1 -b mt6878/Tetris/u https://github.com/abdulla-lin/android_kernel_modules_nothing_mt6878.git vendor/mediatek/kernel_modules
 
-      # 7️⃣ Fix build.config paths
       - name: Fix build.config paths
         run: |
-          cd kernel_build/kernel_device_modules-6.1
+          cd "$WORKDIR"/kernel_device_modules-6.1
           cp build.config.mtk_kernel_device_modules build.config
           mkdir -p kernel_device_modules-6.1
           cp build.config.mtk_kernel_device_modules kernel_device_modules-6.1/build.config.mtk.aarch64.mgk
-          echo "✅ build.config fixed at root and nested folder"
 
-      # 8️⃣ Build kernel
-      - name: Build kernel
+      - name: Build
         run: |
-          cd kernel_build/kernel_device_modules-6.1
-          export MAKEFLAGS="-j2"
-          export CLANG_MAX_JOBS=2
+          cd "$WORKDIR"/kernel_device_modules-6.1
+          export PATH="$WORKDIR/toolchain/bin:$PATH"
+          export CCACHE_DIR="$CCACHE_DIR"
+          export CC="clang"
+          export LLVM=1 LLVM_IAS=1
+          export MAKEFLAGS="-j$(nproc)"
+          export CLANG_MAX_JOBS=$(nproc)
           bash build.sh
 
-      # 9️⃣ Collect artifacts
       - name: Collect artifacts
         run: |
-          mkdir -p artifacts
-          cp kernel_build/out/android14-6.1/dist/Image* artifacts/ || true
-          cp kernel_build/out/android14-6.1/dist/*.img artifacts/ || true
-          cp -r kernel_build/out/android14-6.1/dist/modules artifacts/ || true
-          cd artifacts && zip -r ../kernel_artifacts.zip *
+          mkdir -p "$WORKDIR/artifacts"
+          cp -v $WORKDIR/out/android14-6.1/dist/Image* "$WORKDIR/artifacts/" || true
+          cp -v $WORKDIR/out/android14-6.1/dist/*.img "$WORKDIR/artifacts/" || true
+          cp -rv $WORKDIR/out/android14-6.1/dist/modules "$WORKDIR/artifacts/" || true
+          (cd "$WORKDIR/artifacts" && zip -r ../kernel_artifacts.zip .)
 
-      # 🔟 Upload kernel artifacts
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel_artifacts
-          path: kernel_artifacts.zip
+          path: ${{ env.WORKDIR }}/kernel_artifacts.zip
 
-      # 1️⃣1️⃣ Prepare AnyKernel3 flashable ZIP
-      - name: Prepare AnyKernel3
+      - name: AnyKernel3 packaging
         run: |
+          cd "$WORKDIR"
           git clone --depth=1 https://github.com/WildPlusKernel/AnyKernel3.git AnyKernel3
-          cp kernel_build/out/android14-6.1/dist/Image* AnyKernel3/ || true
-          cp kernel_build/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
-          cp kernel_build/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
-          cp kernel_build/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
+          cp -v $WORKDIR/out/android14-6.1/dist/Image* AnyKernel3/ || true
+          cp -v $WORKDIR/out/android14-6.1/dist/dtbo.img AnyKernel3/ || true
+          cp -v $WORKDIR/out/android14-6.1/dist/vendor_dlkm.img AnyKernel3/ || true
+          cp -v $WORKDIR/out/android14-6.1/dist/system_dlkm.img AnyKernel3/ || true
+          (cd AnyKernel3 && zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip .)
 
-      # 1️⃣2️⃣ Pack AnyKernel3 flashable ZIP
-      - name: Pack AnyKernel3 ZIP
-        run: |
-          cd AnyKernel3
-          zip -r9 ../CMF_Kernel-6.1-$(date +%Y%m%d-%H%M%S).zip *
-
-      # 1️⃣3️⃣ Upload AnyKernel3 ZIP
-      - name: Upload AnyKernel3 ZIP
+      - name: Upload flashable ZIP
         uses: actions/upload-artifact@v4
         with:
           name: CMF_Kernel-Flashable-ZIP
-          path: CMF_Kernel-6.1-*.zip
+          path: ${{ env.WORKDIR }}/CMF_Kernel-6.1-*.zip
